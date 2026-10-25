@@ -197,6 +197,86 @@ body {
 .allapot.hiba { border-left-color: var(--hiba); }
 .allapot.figyelem { border-left-color: var(--figyelem); }
 
+.valasz {
+  margin-top: 14px;
+}
+
+.valasz h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.valasz pre {
+  margin: 0;
+  padding: 12px;
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.85rem;
+  background: var(--hatter);
+  border: 1px solid var(--keret);
+  border-radius: 10px;
+}
+
+.beallitasok summary {
+  font-weight: 600;
+  font-size: 1.05rem;
+  cursor: pointer;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.urlap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.urlap > label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.urlap input[type="text"],
+.urlap input[type="password"] {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  font-size: 16px; /* 16px alatt iOS ráközelít */
+  font-family: inherit;
+  color: var(--szoveg);
+  background: var(--hatter);
+  border: 1px solid var(--keret);
+  border-radius: 10px;
+}
+
+.urlap input:focus {
+  outline: 3px solid var(--info);
+  outline-offset: 1px;
+}
+
+.urlap .jelolo {
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.urlap .jelolo input {
+  width: 20px;
+  height: 20px;
+}
+
+.megjegyzes {
+  margin: 4px 0 6px;
+  font-size: 0.85rem;
+  color: var(--halvany);
+}
+
 .lablec {
   text-align: center;
   color: var(--halvany);

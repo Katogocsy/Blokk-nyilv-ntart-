@@ -9,9 +9,53 @@ const fajlInfo = document.getElementById("fajlInfo");
 const elemzesGomb = document.getElementById("elemzesGomb");
 const allapot = document.getElementById("allapot");
 
-// --- Konfiguráció (config.js-ből) ---
-const CONFIG = window.APP_CONFIG || null;
+const beallitasok = document.getElementById("beallitasok");
+const beallitasForm = document.getElementById("beallitasForm");
+const kulcsMezo = document.getElementById("kulcsMezo");
+const kulcsMutat = document.getElementById("kulcsMutat");
+const modellMezo = document.getElementById("modellMezo");
+const kulcsTorles = document.getElementById("kulcsTorles");
+const valaszDoboz = document.getElementById("valaszDoboz");
+const valaszSzoveg = document.getElementById("valaszSzoveg");
+
+// --- Konfiguráció ---
+// Elsőbbség: a telefonon mentett beállítás, utána a (helyi) config.js, végül az alapérték.
 const GEMINI_API_ALAP = "https://generativelanguage.googleapis.com/v1beta/models";
+const ALAP_MODELL = "gemini-3.6-flash";
+const TAROLO_KULCS = "blokk.geminiApiKey";
+const TAROLO_MODELL = "blokk.geminiModel";
+
+function taroloOlvas(nev) {
+  try {
+    return localStorage.getItem(nev) || "";
+  } catch {
+    return "";
+  }
+}
+
+function taroloIr(nev, ertek) {
+  try {
+    if (ertek) localStorage.setItem(nev, ertek);
+    else localStorage.removeItem(nev);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ervenyesErtek(ertek) {
+  return ertek && !String(ertek).startsWith("IDE_JON") ? String(ertek).trim() : "";
+}
+
+/** Az aktuális beállítások összegyűjtése. */
+function getConfig() {
+  const fajlbol = window.APP_CONFIG || {};
+  return {
+    GEMINI_API_KEY: taroloOlvas(TAROLO_KULCS) || ervenyesErtek(fajlbol.GEMINI_API_KEY),
+    GEMINI_MODEL: taroloOlvas(TAROLO_MODELL) || ervenyesErtek(fajlbol.GEMINI_MODEL) || ALAP_MODELL,
+    APPS_SCRIPT_URL: ervenyesErtek(fajlbol.APPS_SCRIPT_URL),
+  };
+}
 
 // A Gemini beágyazott (inline) képküldésnél a teljes kérés max. ~20 MB lehet,
 // a base64 kódolás pedig kb. 33%-kal növeli a méretet – ezért 10 MB a korlát.
@@ -37,18 +81,59 @@ function meretFormazas(bajt) {
   return (bajt / (1024 * 1024)).toFixed(1) + " MB";
 }
 
-/** Ellenőrzi, hogy a config.js betöltődött-e és ki van-e töltve. */
+/** Ellenőrzi, hogy van-e API kulcs. */
 function konfigHiba() {
-  if (!CONFIG) {
-    return "Hiányzik a config.js. Másold le a config.example.js-t config.js néven.";
-  }
-  if (!CONFIG.GEMINI_API_KEY || CONFIG.GEMINI_API_KEY.startsWith("IDE_JON")) {
-    return "Add meg a Gemini API kulcsot a config.js fájlban.";
-  }
-  if (!CONFIG.GEMINI_MODEL) {
-    return "Add meg a modell nevét (GEMINI_MODEL) a config.js fájlban.";
+  if (!getConfig().GEMINI_API_KEY) {
+    return "Még nincs megadva Gemini API kulcs. Nyisd meg lent a ⚙️ Beállításokat.";
   }
   return null;
+}
+
+/** Beállítások mezőinek feltöltése a mentett értékekkel. */
+function beallitasokBetoltese() {
+  kulcsMezo.value = taroloOlvas(TAROLO_KULCS);
+  modellMezo.value = taroloOlvas(TAROLO_MODELL) || getConfig().GEMINI_MODEL;
+}
+
+function beallitasokMentese(esemeny) {
+  esemeny.preventDefault();
+  const kulcs = kulcsMezo.value.trim();
+  const modell = modellMezo.value.trim();
+
+  if (!kulcs) {
+    allapotBeallitas("Add meg az API kulcsot a mentéshez.", "figyelem");
+    kulcsMezo.focus();
+    return;
+  }
+
+  const sikerult =
+    taroloIr(TAROLO_KULCS, kulcs) &&
+    taroloIr(TAROLO_MODELL, modell && modell !== ALAP_MODELL ? modell : "");
+
+  if (!sikerult) {
+    allapotBeallitas(
+      "Nem sikerült menteni. A böngésző tiltja a tárolást (pl. privát/inkognitó mód).",
+      "hiba"
+    );
+    return;
+  }
+
+  kulcsMutat.checked = false;
+  kulcsMezo.type = "password";
+  beallitasok.open = false;
+  allapotBeallitas(
+    kivalasztottFajl
+      ? "Beállítások elmentve. Nyomd meg az „Elemzés” gombot."
+      : "Beállítások elmentve. Most válassz ki vagy fotózz le egy blokkot.",
+    "siker"
+  );
+}
+
+function kulcsTorlese() {
+  if (!confirm("Biztosan törlöd az API kulcsot erről a telefonról?")) return;
+  taroloIr(TAROLO_KULCS, "");
+  kulcsMezo.value = "";
+  allapotBeallitas("Az API kulcs törölve erről az eszközről.", "info");
 }
 
 /** A kép MIME-típusa; ha a böngésző nem adja meg, a kiterjesztésből találjuk ki. */
@@ -160,7 +245,8 @@ async function sendToGemini(imageFile) {
     ],
   };
 
-  const url = `${GEMINI_API_ALAP}/${encodeURIComponent(CONFIG.GEMINI_MODEL)}:generateContent`;
+  const cfg = getConfig();
+  const url = `${GEMINI_API_ALAP}/${encodeURIComponent(cfg.GEMINI_MODEL)}:generateContent`;
 
   let valasz;
   try {
@@ -168,7 +254,7 @@ async function sendToGemini(imageFile) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-goog-api-key": CONFIG.GEMINI_API_KEY,
+        "x-goog-api-key": cfg.GEMINI_API_KEY,
       },
       body: JSON.stringify(keres),
     });
@@ -207,13 +293,28 @@ async function elemzes() {
     return;
   }
 
+  const hianyzik = konfigHiba();
+  if (hianyzik) {
+    allapotBeallitas(hianyzik, "figyelem");
+    beallitasok.open = true;
+    kulcsMezo.focus();
+    return;
+  }
+
   elemzesGomb.disabled = true;
+  valaszDoboz.hidden = true;
   allapotBeallitas("Elemzés folyamatban… (Gemini)", "info");
 
   try {
-    await sendToGemini(kivalasztottFajl);
+    const adat = await sendToGemini(kivalasztottFajl);
+    const szoveg = adat?.candidates?.[0]?.content?.parts
+      ?.map((p) => p.text || "")
+      .join("")
+      .trim();
+    valaszSzoveg.textContent = szoveg || "(Nem érkezett szöveges válasz.)";
+    valaszDoboz.hidden = false;
     allapotBeallitas(
-      "Az elemzés kész. A nyers válasz a böngésző konzoljában látható.",
+      "Az elemzés kész. A teljes nyers válasz a böngésző konzoljában is megtalálható.",
       "siker"
     );
   } catch (hiba) {
@@ -234,5 +335,15 @@ elonezetKep.addEventListener("error", elonezetHiba);
 window.BLOKK_APP_BETOLTVE = true;
 
 // Induláskor jelezzük, ha hiányzik a beállítás
+beallitasForm.addEventListener("submit", beallitasokMentese);
+kulcsTorles.addEventListener("click", kulcsTorlese);
+kulcsMutat.addEventListener("change", () => {
+  kulcsMezo.type = kulcsMutat.checked ? "text" : "password";
+});
+
+beallitasokBetoltese();
 const indulasiHiba = konfigHiba();
-if (indulasiHiba) allapotBeallitas(indulasiHiba, "figyelem");
+if (indulasiHiba) {
+  allapotBeallitas(indulasiHiba, "figyelem");
+  beallitasok.open = true;
+}

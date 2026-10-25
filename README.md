@@ -26,10 +26,17 @@ Strukturált (JSON) adatkinyerés és Google Sheets mentés **még nincs**.
 
 ## Beállítás
 
-1. Másold le a `config.example.js` fájlt **`config.js`** néven.
-2. Írd be a Gemini API kulcsodat a `GEMINI_API_KEY` mezőbe.
-3. A `GEMINI_MODEL` alapértéke `gemini-3.6-flash`. Ha mindig a legújabb Flash modellt szeretnéd, írd át `gemini-flash-latest`-re.
-4. Az `APPS_SCRIPT_URL` most még maradhat helyőrző.
+### GitHub Pages / telefon (ajánlott)
+
+1. Nyisd meg az oldalt, és lent a **⚙️ Beállítások** részbe illeszd be a Gemini API kulcsot.
+2. A modell alapértéke `gemini-3.6-flash`. Ha mindig a legújabb Flash modellt szeretnéd, írd át `gemini-flash-latest`-re.
+3. Nyomd meg a **Mentés** gombot.
+
+A kulcs csak az adott telefon böngészőjében tárolódik (localStorage), a GitHubra nem kerül fel. Inkognitó módban nem marad meg. Ha másik eszközt vagy böngészőt használsz, ott újra meg kell adni.
+
+### Helyi fejlesztés (opcionális)
+
+A saját gépeden a `config.example.js` **másolatát** elmentheted `config.js` néven, és beírhatod a kulcsot. A `config.js`-t soha ne töltsd fel – a `.gitignore` kizárja. A Beállításokban mentett érték elsőbbséget élvez a `config.js`-sel szemben.
 
 ## Gemini API kulcs szerzése (Google AI Studio)
 
