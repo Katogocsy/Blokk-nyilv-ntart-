@@ -9,10 +9,11 @@ Egyszerű, mobilbarát webalkalmazás bevásárlási blokkok nyilvántartására
 - 📷 **Blokk fotózása** – mobilon közvetlenül a hátsó kamerát nyitja meg
 - 📁 **Blokk feltöltése** – meglévő kép kiválasztása
 - 🖼️ **Kép előnézet** fájlnévvel és mérettel
-- 🔍 **Elemzés** – a képet elküldi a Gemini Flash API-nak, a nyers választ a böngésző konzoljára írja
+- 🔍 **Elemzés** – a Gemini Flash strukturált JSON-ban adja vissza a blokk adatait (bolt, dátum, pénznem, összegek, fizetési mód, OCR-bizalom, termékek); a JSON ideiglenesen a képernyőn is megjelenik
+- ✅ **Ellenőrzés** – ha a tételek összege nem egyezik a bruttó végösszeggel, vagy a dátum nem YYYY-MM-DD, figyelmeztet, és az OCR-bizalmat „alacsony”-ra állítja
 - ℹ️ **Állapotjelző** szöveg
 
-Strukturált (JSON) adatkinyerés és Google Sheets mentés **még nincs**.
+Szerkeszthető ellenőrző űrlap és Google Sheets mentés **még nincs**.
 
 ## Fájlok
 
@@ -73,6 +74,6 @@ Teszteléshez nyisd meg a böngésző fejlesztői konzolját (F12 → Console), 
 ## Következő lépések
 
 - [x] Gemini Flash API hívás (`sendToGemini`)
-- [ ] Strukturált JSON válasz kérése (bolt, dátum, tételek, végösszeg)
+- [x] Strukturált JSON válasz kérése
 - [ ] Felismert adatok szerkeszthető űrlapon
 - [ ] Mentés Google Sheets-be Apps Script Web App-on keresztül
