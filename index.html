@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#1f7a5a">
+  <title>Blokk-nyilvántartó</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="fejlec">
+    <h1>🧾 Blokk-nyilvántartó</h1>
+    <p class="alcim">Fotózd le a blokkot, ellenőrizd az adatokat, és mentsd el.</p>
+  </header>
+
+  <main class="tartalom">
+    <section class="kartya">
+      <h2>1. Kép kiválasztása</h2>
+
+      <div class="gombsor">
+        <label for="kameraInput" class="gomb gomb-elsodleges">
+          📷 Blokk fotózása
+        </label>
+        <input type="file" id="kameraInput" accept="image/*" capture="environment" hidden>
+
+        <label for="feltoltesInput" class="gomb gomb-masodlagos">
+          📁 Blokk feltöltése
+        </label>
+        <input type="file" id="feltoltesInput" accept="image/*" hidden>
+      </div>
+    </section>
+
+    <section class="kartya" id="elonezetKartya">
+      <h2>2. Előnézet</h2>
+      <div class="elonezet" id="elonezetDoboz">
+        <p class="elonezet-ures" id="elonezetUres">Még nincs kiválasztott kép.</p>
+        <img id="elonezetKep" alt="A kiválasztott blokk előnézete" hidden>
+      </div>
+      <p class="fajlinfo" id="fajlInfo"></p>
+    </section>
+
+    <section class="kartya">
+      <h2>3. Elemzés</h2>
+      <button type="button" id="elemzesGomb" class="gomb gomb-elsodleges gomb-teljes" disabled>
+        🔍 Elemzés
+      </button>
+      <p class="allapot" id="allapot" role="status" aria-live="polite">
+        Válassz ki vagy fotózz le egy blokkot.
+      </p>
+    </section>
+
+    <section class="kartya" id="ellenorzesKartya" hidden>
+      <h2>4. Ellenőrzés és javítás</h2>
+
+      <div class="ellenorzes-fej">
+        <img id="kisKep" class="kis-kep" alt="A blokk képe – koppints a nagyításhoz" title="Koppints a nagyításhoz">
+        <div class="ellenorzes-info">
+          <span id="bizalomJelzo" class="bizalom"></span>
+          <p class="megjegyzes">Hasonlítsd össze az adatokat a képpel, és javítsd, ami hibás. Koppints a képre a nagyításhoz.</p>
+        </div>
+      </div>
+
+      <ul id="figyelmeztetesLista" class="figyelmeztetesek" hidden></ul>
+
+      <form id="blokkUrlap" class="urlap blokk-urlap" novalidate autocomplete="off">
+        <label for="mezoBolt">Bolt</label>
+        <input type="text" id="mezoBolt" data-mezo="bolt">
+
+        <div class="mezo-sor">
+          <div>
+            <label for="mezoDatum">Dátum</label>
+            <input type="date" id="mezoDatum" data-mezo="datum">
+          </div>
+          <div>
+            <label for="mezoFizetes">Fizetési mód</label>
+            <input type="text" id="mezoFizetes" data-mezo="fizetes_modja" list="fizetesiModok">
+            <datalist id="fizetesiModok">
+              <option value="bankkártya">
+              <option value="készpénz">
+              <option value="SZÉP-kártya">
+              <option value="utalvány">
+            </datalist>
+          </div>
+        </div>
+
+        <div class="mezo-sor">
+          <div>
+            <label for="mezoBrutto">Bruttó végösszeg <span class="penznem-jel"></span></label>
+            <input type="text" id="mezoBrutto" data-mezo="brutto_vegosszeg" data-szam inputmode="decimal">
+          </div>
+          <div>
+            <label for="mezoAfa">ÁFA összege <span class="penznem-jel"></span></label>
+            <input type="text" id="mezoAfa" data-mezo="afa_osszeg" data-szam inputmode="decimal">
+          </div>
+        </div>
+
+        <h3 class="alcim-termekek">Termékek</h3>
+        <div class="tabla-gorgeto">
+          <table class="termek-tabla">
+            <thead>
+              <tr>
+                <th>Név</th>
+                <th>Menny.</th>
+                <th>Egységár</th>
+                <th>Részösszeg</th>
+                <th><span class="rejtett-szoveg">Törlés</span></th>
+              </tr>
+            </thead>
+            <tbody id="termekTorzs"></tbody>
+            <tfoot>
+              <tr>
+                <td colspan="3">Termékek összege</td>
+                <td id="termekOsszeg" class="szam-cella">0</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <button type="button" id="sorHozzaadas" class="gomb gomb-masodlagos">➕ Sor hozzáadása</button>
+
+        <div id="osszegFigyelmeztetes" class="sarga-figyelmeztetes" role="alert" hidden></div>
+
+        <button type="submit" id="mentesGomb" class="gomb gomb-elsodleges gomb-teljes" disabled>📤 Mentés a Sheets-be</button>
+        <p id="mentesInfo" class="megjegyzes"></p>
+      </form>
+
+      <details class="fejlesztoi">
+        <summary>Nyers JSON (fejlesztői nézet)</summary>
+        <pre id="valaszSzoveg"></pre>
+      </details>
+    </section>
+
+    <details class="kartya beallitasok" id="beallitasok">
+      <summary>⚙️ Beállítások</summary>
+
+      <form id="beallitasForm" class="urlap" autocomplete="off">
+        <label for="kulcsMezo">Gemini API kulcs</label>
+        <input type="password" id="kulcsMezo" placeholder="AIza…" spellcheck="false" autocapitalize="off">
+
+        <label class="jelolo">
+          <input type="checkbox" id="kulcsMutat"> Kulcs megjelenítése
+        </label>
+
+        <label for="modellMezo">Modell</label>
+        <input type="text" id="modellMezo" placeholder="gemini-3.6-flash" spellcheck="false" autocapitalize="off">
+
+        <p class="megjegyzes">
+          A kulcs csak ezen a telefonon, ebben a böngészőben tárolódik. A GitHubra nem kerül fel.
+        </p>
+
+        <div class="gombsor">
+          <button type="submit" class="gomb gomb-elsodleges">💾 Mentés</button>
+          <button type="button" id="kulcsTorles" class="gomb gomb-masodlagos">🗑️ Kulcs törlése</button>
+        </div>
+      </form>
+    </details>
+  </main>
+
+  <footer class="lablec">
+    <small>Blokk-nyilvántartó · fejlesztői verzió</small>
+  </footer>
+
+  <!-- Opcionális: helyi fejlesztéshez a config.js (a config.example.js másolata).
+       GitHub Pages-en nem kell, ott a Beállítások mezőt használd. -->
+  <script src="config.js" onerror="this.remove()"></script>
+  <script src="app.js"></script>
+  <script>
+    // Ha az app.js nem töltődött be, ezt jelezzük a felületen
+    if (!window.BLOKK_APP_BETOLTVE) {
+      var a = document.getElementById("allapot");
+      a.textContent = "Hiba: az app.js nem töltődött be. Ellenőrizd, hogy az app.js pontosan ezen a néven, az index.html mellett van-e.";
+      a.className = "allapot hiba";
+    }
+  </script>
+</body>
+</html>
