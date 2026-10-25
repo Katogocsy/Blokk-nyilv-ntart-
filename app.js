@@ -15,9 +15,25 @@ const kulcsMezo = document.getElementById("kulcsMezo");
 const kulcsMutat = document.getElementById("kulcsMutat");
 const modellMezo = document.getElementById("modellMezo");
 const kulcsTorles = document.getElementById("kulcsTorles");
-const valaszDoboz = document.getElementById("valaszDoboz");
 const valaszSzoveg = document.getElementById("valaszSzoveg");
 const figyelmeztetesLista = document.getElementById("figyelmeztetesLista");
+
+const elonezetKartya = document.getElementById("elonezetKartya");
+const ellenorzesKartya = document.getElementById("ellenorzesKartya");
+const kisKep = document.getElementById("kisKep");
+const bizalomJelzo = document.getElementById("bizalomJelzo");
+const blokkUrlap = document.getElementById("blokkUrlap");
+const mezoBolt = document.getElementById("mezoBolt");
+const mezoDatum = document.getElementById("mezoDatum");
+const mezoFizetes = document.getElementById("mezoFizetes");
+const mezoBrutto = document.getElementById("mezoBrutto");
+const mezoAfa = document.getElementById("mezoAfa");
+const termekTorzs = document.getElementById("termekTorzs");
+const termekOsszeg = document.getElementById("termekOsszeg");
+const sorHozzaadas = document.getElementById("sorHozzaadas");
+const osszegFigyelmeztetes = document.getElementById("osszegFigyelmeztetes");
+const mentesGomb = document.getElementById("mentesGomb");
+const mentesInfo = document.getElementById("mentesInfo");
 
 // --- Konfiguráció ---
 // Elsőbbség: a telefonon mentett beállítás, utána a (helyi) config.js, végül az alapérték.
@@ -171,6 +187,8 @@ function kepKezelese(fajl) {
 
   kivalasztottFajl = fajl;
   elonezetUrl = URL.createObjectURL(fajl);
+
+  urlapElrejtese();
 
   elonezetKep.src = elonezetUrl;
   elonezetKep.hidden = false;
@@ -393,13 +411,14 @@ function ervenyesDatum(datum) {
 /**
  * Ellenőrzések a szabályok szerint. A Gemini döntését nem hisszük el vakon:
  * ha a részösszegek nem egyeznek a végösszeggel, itt is „alacsony”-ra állítjuk.
- * @returns {string[]} figyelmeztetések a felhasználónak
+ * @returns {{szoveg: string, osszeg?: boolean}[]} figyelmeztetések a felhasználónak
+ *   (az „osszeg: true” jelölésűt az űrlap élőben, sárgán mutatja)
  */
 function blokkEllenorzese(blokk) {
   const figyelmeztetesek = [];
 
   if (blokk.datum !== null && !ervenyesDatum(blokk.datum)) {
-    figyelmeztetesek.push(`A dátum („${blokk.datum}”) nem YYYY-MM-DD formátumú, ezért null lett.`);
+    figyelmeztetesek.push({ szoveg: `A dátum („${blokk.datum}”) nem volt YYYY-MM-DD formátumú, ezért üresen hagytam – add meg kézzel.` });
     blokk.datum = null;
   }
 
@@ -408,9 +427,9 @@ function blokkEllenorzese(blokk) {
   const osszeg = Math.round(reszek.reduce((s, r) => s + (r || 0), 0) * 100) / 100;
 
   if (blokk.brutto_vegosszeg === null) {
-    figyelmeztetesek.push("A bruttó végösszeg nem olvasható, az összegek nem ellenőrizhetők.");
+    figyelmeztetesek.push({ szoveg: "A bruttó végösszeg nem volt olvasható – add meg kézzel." });
   } else if (blokk.termekek.length === 0) {
-    figyelmeztetesek.push("Nem sikerült termékeket kiolvasni.");
+    figyelmeztetesek.push({ szoveg: "Nem sikerült termékeket kiolvasni – a „Sor hozzáadása” gombbal felveheted őket." });
     blokk.ocr_bizalom = "alacsony";
   } else {
     // Közelítő egyezés: 1% vagy legalább 5 egység eltérés (pl. kerekítés miatt) elfogadható
@@ -418,9 +437,10 @@ function blokkEllenorzese(blokk) {
     const elteres = Math.abs(osszeg - blokk.brutto_vegosszeg);
     if (hianyzoResz || elteres > tures) {
       const ok = hianyzoResz ? "néhány tétel részösszege hiányzik" : `eltérés: ${elteres}`;
-      figyelmeztetesek.push(
-        `A tételek összege (${osszeg}) nem egyezik a bruttó végösszeggel (${blokk.brutto_vegosszeg}) – ${ok}.`
-      );
+      figyelmeztetesek.push({
+        osszeg: true,
+        szoveg: `A tételek összege (${osszeg}) nem egyezik a bruttó végösszeggel (${blokk.brutto_vegosszeg}) – ${ok}.`,
+      });
       blokk.ocr_bizalom = "alacsony";
     }
   }
@@ -432,7 +452,7 @@ function blokkEllenorzese(blokk) {
  * Kép elküldése a Gemini Flash API-nak, strukturált JSON-választ kérve.
  * A nyers választ a konzolra írja; hibánál kivételt dob.
  * @param {File} imageFile
- * @returns {Promise<{nyers: object, blokk: object, figyelmeztetesek: string[]}>}
+ * @returns {Promise<{nyers: object, blokk: object, figyelmeztetesek: {szoveg: string, osszeg?: boolean}[]}>}
  */
 async function sendToGemini(imageFile) {
   const hiba = konfigHiba();
@@ -485,6 +505,311 @@ async function sendToGemini(imageFile) {
   return { nyers, blokk, figyelmeztetesek };
 }
 
+// --- Ellenőrző űrlap ---
+
+/** Az űrlapon szerkesztett blokk aktuális állapota (a Gemini JSON-jából indul). */
+let blokkAllapot = null;
+
+const SZAM_FORMATUM = new Intl.NumberFormat("hu-HU", { maximumFractionDigits: 2 });
+const BIZALOM_FELIRAT = {
+  magas: "OCR-bizalom: magas",
+  kozepes: "OCR-bizalom: közepes",
+  alacsony: "OCR-bizalom: alacsony",
+};
+
+function kerekit2(szam) {
+  return Math.round(szam * 100) / 100;
+}
+
+function szamFormazas(szam) {
+  return szam === null ? "–" : SZAM_FORMATUM.format(szam);
+}
+
+/** Szám a beviteli mezőbe: ezres elválasztó nélkül, tizedesvesszővel. */
+function szamMezobe(szam) {
+  return szam === null || szam === undefined ? "" : String(szam).replace(".", ",");
+}
+
+/**
+ * Beírt szám értelmezése. Elfogadja: „1250”, „1 250”, „1,25”, „1.25”, „1.250,50”, „1250 Ft”.
+ * @returns {{ertek: number|null, hibas: boolean}}
+ */
+function mezoSzam(szoveg) {
+  let t = String(szoveg).trim().replace(/\s/g, "").replace(/(ft|huf)$/i, "");
+  if (!t) return { ertek: null, hibas: false };
+  if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+  const ertek = Number(t);
+  return Number.isFinite(ertek) ? { ertek, hibas: false } : { ertek: null, hibas: true };
+}
+
+/** A blokk pénznemére érvényes eltérési tűrés (forintnál a kerekítés miatt 2 Ft). */
+function osszegTures() {
+  const penznem = (blokkAllapot?.penznem || "HUF").toUpperCase();
+  return penznem === "HUF" ? 2 : 0.01;
+}
+
+/** Az űrlap feltöltése a felismert adatokkal és megjelenítése. */
+function urlapMegjelenitese(blokk, figyelmeztetesek) {
+  blokkAllapot = structuredClone(blokk);
+
+  kisKep.src = elonezetUrl;
+  kepNagyitas(false);
+
+  bizalomJelzo.textContent = BIZALOM_FELIRAT[blokk.ocr_bizalom] || "";
+  bizalomJelzo.className = "bizalom " + (blokk.ocr_bizalom || "");
+
+  mezoBolt.value = blokk.bolt || "";
+  mezoDatum.value = blokk.datum || "";
+  mezoFizetes.value = blokk.fizetes_modja || "";
+  mezoBrutto.value = szamMezobe(blokk.brutto_vegosszeg);
+  mezoAfa.value = szamMezobe(blokk.afa_osszeg);
+  blokkUrlap.querySelectorAll("input.hibas").forEach((el) => el.classList.remove("hibas"));
+
+  const penznemJel = blokk.penznem ? `(${blokk.penznem})` : "";
+  document.querySelectorAll(".penznem-jel").forEach((el) => (el.textContent = penznemJel));
+
+  // Az összeg-eltérést az űrlap élőben jelzi, ezért azt itt nem ismételjük
+  const egyeb = figyelmeztetesek.filter((f) => !f.osszeg);
+  figyelmeztetesLista.replaceChildren(
+    ...egyeb.map((f) => Object.assign(document.createElement("li"), { textContent: f.szoveg }))
+  );
+  figyelmeztetesLista.hidden = egyeb.length === 0;
+
+  termekekKirajzolasa();
+  urlapFrissites();
+  mentesInfo.textContent = "";
+
+  elonezetKartya.hidden = true;
+  ellenorzesKartya.hidden = false;
+  ellenorzesKartya.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/** A kis kép nagyítása/kicsinyítése (paraméter nélkül vált). */
+function kepNagyitas(nagy) {
+  const legyenNagy = typeof nagy === "boolean" ? nagy : !kisKep.classList.contains("nagy");
+  kisKep.classList.toggle("nagy", legyenNagy);
+  kisKep.closest(".ellenorzes-fej").classList.toggle("nagyitva", legyenNagy);
+}
+
+function urlapElrejtese() {
+  blokkAllapot = null;
+  ellenorzesKartya.hidden = true;
+  elonezetKartya.hidden = false;
+}
+
+function szamInput(mezo, ertek, cimke) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.inputMode = "decimal";
+  input.dataset.termek = mezo;
+  input.dataset.szam = "";
+  input.value = szamMezobe(ertek);
+  input.setAttribute("aria-label", cimke);
+  return input;
+}
+
+function cella(osztaly, ...tartalom) {
+  const td = document.createElement("td");
+  td.className = osztaly;
+  td.append(...tartalom);
+  return td;
+}
+
+/** Egy terméksor elkészítése. */
+function termekSor(termek, index) {
+  const tr = document.createElement("tr");
+  tr.dataset.index = String(index);
+  const sorszam = index + 1;
+
+  const nev = document.createElement("input");
+  nev.type = "text";
+  nev.dataset.termek = "termek_nev";
+  nev.value = termek.termek_nev || "";
+  nev.setAttribute("aria-label", `${sorszam}. termék neve`);
+
+  const mennyCella = cella("oszlop-menny", szamInput("mennyiseg", termek.mennyiseg, `${sorszam}. termék mennyisége`));
+  if (termek.mennyisegi_egyseg) {
+    mennyCella.append(Object.assign(document.createElement("span"), {
+      className: "egyseg-jel",
+      textContent: termek.mennyisegi_egyseg,
+    }));
+  }
+
+  const torles = document.createElement("button");
+  torles.type = "button";
+  torles.className = "sor-torles";
+  torles.dataset.torles = "";
+  torles.textContent = "🗑️";
+  torles.title = "Sor törlése";
+  torles.setAttribute("aria-label", `${sorszam}. sor törlése`);
+
+  tr.append(
+    cella("oszlop-nev", nev),
+    mennyCella,
+    cella("oszlop-ar", szamInput("egysegar", termek.egysegar, `${sorszam}. termék egységára`)),
+    cella("oszlop-resz", szamInput("reszosszeg", termek.reszosszeg, `${sorszam}. termék részösszege`)),
+    cella("oszlop-torles", torles)
+  );
+  return tr;
+}
+
+function termekekKirajzolasa() {
+  const sorok = blokkAllapot.termekek.map(termekSor);
+  if (sorok.length === 0) {
+    const tr = document.createElement("tr");
+    const td = cella("ures-tabla", "Nincs termék. A „Sor hozzáadása” gombbal vehetsz fel újat.");
+    td.colSpan = 5;
+    tr.append(td);
+    sorok.push(tr);
+  }
+  termekTorzs.replaceChildren(...sorok);
+}
+
+/** Bármely mező változásakor: állapot frissítése és újraszámolás. */
+function urlapValtozas(esemeny) {
+  const mezo = esemeny.target;
+  if (!blokkAllapot || mezo.tagName !== "INPUT") return;
+
+  if (mezo.dataset.mezo) {
+    // Fejléc-mezők (bolt, dátum, fizetési mód, bruttó, ÁFA)
+    if ("szam" in mezo.dataset) {
+      const { ertek, hibas } = mezoSzam(mezo.value);
+      mezo.classList.toggle("hibas", hibas);
+      blokkAllapot[mezo.dataset.mezo] = ertek;
+    } else {
+      blokkAllapot[mezo.dataset.mezo] = mezo.value.trim() || null;
+    }
+  } else if (mezo.dataset.termek) {
+    // Terméksor mezői
+    const tr = mezo.closest("tr");
+    const termek = blokkAllapot.termekek[Number(tr.dataset.index)];
+    const kulcs = mezo.dataset.termek;
+
+    if ("szam" in mezo.dataset) {
+      const { ertek, hibas } = mezoSzam(mezo.value);
+      mezo.classList.toggle("hibas", hibas);
+      termek[kulcs] = ertek;
+
+      // Mennyiség vagy egységár módosításakor a részösszeg automatikusan frissül
+      if ((kulcs === "mennyiseg" || kulcs === "egysegar") && termek.mennyiseg !== null && termek.egysegar !== null) {
+        termek.reszosszeg = kerekit2(termek.mennyiseg * termek.egysegar);
+        const reszMezo = tr.querySelector('[data-termek="reszosszeg"]');
+        reszMezo.value = szamMezobe(termek.reszosszeg);
+        reszMezo.classList.remove("hibas");
+      }
+    } else {
+      termek[kulcs] = mezo.value.trim() || null;
+    }
+  }
+
+  mentesInfo.textContent = "";
+  urlapFrissites();
+}
+
+/** Összeg, figyelmeztetés, mentés gomb és fejlesztői JSON frissítése. */
+function urlapFrissites() {
+  osszegFrissites();
+  mentesAllapotFrissites();
+  valaszSzoveg.textContent = JSON.stringify(mentendoAdat(), null, 2);
+}
+
+function osszegFrissites() {
+  const termekek = blokkAllapot.termekek;
+  const osszeg = kerekit2(termekek.reduce((s, t) => s + (t.reszosszeg ?? 0), 0));
+  const hianyzo = termekek.filter((t) => t.reszosszeg === null).length;
+  const brutto = blokkAllapot.brutto_vegosszeg;
+
+  termekOsszeg.textContent = szamFormazas(osszeg);
+
+  const elteres = brutto === null ? 0 : kerekit2(osszeg - brutto);
+  const elter = brutto !== null && Math.abs(elteres) > osszegTures();
+
+  if (elter || (brutto !== null && hianyzo > 0)) {
+    const penznem = blokkAllapot.penznem ? " " + blokkAllapot.penznem : "";
+    let uzenet =
+      `⚠️ A termékek összege (${szamFormazas(osszeg)}${penznem}) ` +
+      (elter
+        ? `eltér a bruttó végösszegtől (${szamFormazas(brutto)}${penznem}), különbség: ${elteres > 0 ? "+" : ""}${szamFormazas(elteres)}${penznem}.`
+        : `egyezik a bruttó végösszeggel, de nem minden tételnek van részösszege.`);
+    if (hianyzo > 0) uzenet += ` ${hianyzo} tételnél hiányzik a részösszeg.`;
+    if (elter) uzenet += " Ellenőrizd a tételeket, a kedvezményeket és a hiányzó sorokat.";
+    osszegFigyelmeztetes.textContent = uzenet;
+    osszegFigyelmeztetes.hidden = false;
+  } else {
+    osszegFigyelmeztetes.hidden = true;
+  }
+}
+
+/** A „Mentés a Sheets-be” gomb csak akkor aktív, ha van bolt, érvényes dátum és bruttó végösszeg. */
+function mentesAllapotFrissites() {
+  const hianyzik = [];
+  if (!blokkAllapot.bolt) hianyzik.push("bolt");
+  if (!blokkAllapot.datum || !ervenyesDatum(blokkAllapot.datum)) hianyzik.push("dátum");
+  if (blokkAllapot.brutto_vegosszeg === null) hianyzik.push("bruttó végösszeg");
+  const hibasMezok = blokkUrlap.querySelectorAll("input.hibas").length;
+
+  mentesGomb.disabled = hianyzik.length > 0 || hibasMezok > 0;
+
+  if (hianyzik.length) {
+    mentesGomb.title = `A mentéshez hiányzik: ${hianyzik.join(", ")}`;
+    if (!mentesInfo.textContent) mentesInfo.textContent = `A mentéshez add meg: ${hianyzik.join(", ")}.`;
+  } else if (hibasMezok) {
+    mentesGomb.title = "Javítsd a hibás számokat";
+    if (!mentesInfo.textContent) mentesInfo.textContent = "Javítsd a pirossal jelölt mezőket (nem érvényes szám).";
+  } else {
+    mentesGomb.title = "";
+  }
+}
+
+/** A mentésre kész adatok: a teljesen üres terméksorok nélkül. */
+function mentendoAdat() {
+  if (!blokkAllapot) return null;
+  return {
+    ...blokkAllapot,
+    termekek: blokkAllapot.termekek.filter(
+      (t) => t.termek_nev || t.reszosszeg !== null || t.egysegar !== null
+    ),
+  };
+}
+
+function sorHozzaadasa() {
+  if (!blokkAllapot) return;
+  blokkAllapot.termekek.push({
+    termek_nev: null,
+    mennyiseg: 1,
+    mennyisegi_egyseg: null,
+    egysegar: null,
+    reszosszeg: null,
+  });
+  termekekKirajzolasa();
+  urlapFrissites();
+  const ujSor = termekTorzs.lastElementChild;
+  ujSor.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  ujSor.querySelector('[data-termek="termek_nev"]').focus({ preventScroll: true });
+}
+
+function sorTorleseKattintas(esemeny) {
+  const gomb = esemeny.target.closest("[data-torles]");
+  if (!gomb || !blokkAllapot) return;
+  const index = Number(gomb.closest("tr").dataset.index);
+  blokkAllapot.termekek.splice(index, 1);
+  termekekKirajzolasa();
+  urlapFrissites();
+}
+
+/** Mentés – a Sheets-integráció a következő lépésben kerül ide. */
+function mentesSheetsbe(esemeny) {
+  esemeny.preventDefault();
+  mentesAllapotFrissites();
+  if (mentesGomb.disabled) return;
+
+  const adat = mentendoAdat();
+  console.log("Mentésre kész adatok:", adat);
+  // TODO: elküldés az Apps Script Web App-nak (APPS_SCRIPT_URL)
+  mentesInfo.textContent =
+    "✅ Az adatok rendben vannak. A Google Sheets-mentés a következő lépésben kerül bekötésre.";
+}
+
 /** Elemzés gomb kezelése. */
 async function elemzes() {
   if (!kivalasztottFajl) {
@@ -501,28 +826,20 @@ async function elemzes() {
   }
 
   elemzesGomb.disabled = true;
-  valaszDoboz.hidden = true;
   allapotBeallitas("Elemzés folyamatban… (Gemini)", "info");
 
   try {
     const { blokk, figyelmeztetesek } = await sendToGemini(kivalasztottFajl);
-
-    // Ideiglenes megjelenítés ellenőrzéshez
-    valaszSzoveg.textContent = JSON.stringify(blokk, null, 2);
-    figyelmeztetesLista.replaceChildren(
-      ...figyelmeztetesek.map((f) => Object.assign(document.createElement("li"), { textContent: f }))
-    );
-    figyelmeztetesLista.hidden = figyelmeztetesek.length === 0;
-    valaszDoboz.hidden = false;
+    urlapMegjelenitese(blokk, figyelmeztetesek);
 
     const tetelSzam = blokk.termekek.length;
     if (blokk.ocr_bizalom === "alacsony" || figyelmeztetesek.length) {
       allapotBeallitas(
-        `Elemzés kész (${tetelSzam} tétel), de a kiolvasás bizonytalan – ellenőrizd az adatokat!`,
+        `Elemzés kész (${tetelSzam} tétel), de a kiolvasás bizonytalan – ellenőrizd az adatokat lent!`,
         "figyelem"
       );
     } else {
-      allapotBeallitas(`Elemzés kész: ${tetelSzam} tétel, OCR-bizalom: ${blokk.ocr_bizalom}.`, "siker");
+      allapotBeallitas(`Elemzés kész: ${tetelSzam} tétel. Ellenőrizd az adatokat lent.`, "siker");
     }
   } catch (hiba) {
     console.error(hiba);
@@ -537,6 +854,13 @@ kameraInput.addEventListener("change", inputValtozas);
 feltoltesInput.addEventListener("change", inputValtozas);
 elemzesGomb.addEventListener("click", elemzes);
 elonezetKep.addEventListener("error", elonezetHiba);
+
+blokkUrlap.addEventListener("input", urlapValtozas);
+blokkUrlap.addEventListener("change", urlapValtozas);
+blokkUrlap.addEventListener("submit", mentesSheetsbe);
+sorHozzaadas.addEventListener("click", sorHozzaadasa);
+termekTorzs.addEventListener("click", sorTorleseKattintas);
+kisKep.addEventListener("click", kepNagyitas);
 
 // Jelzés az index.html-nek, hogy a szkript betöltődött
 window.BLOKK_APP_BETOLTVE = true;
