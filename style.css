@@ -226,6 +226,7 @@ body {
 
 .urlap input[type="text"],
 .urlap input[type="password"],
+.urlap input[type="url"],
 .urlap input[type="date"] {
   width: 100%;
   min-height: 48px;
@@ -599,4 +600,15 @@ input.hibas {
   .termek-tabla .oszlop-torles {
     text-align: right;
   }
+}
+
+/* Mentés eredménye a gomb alatt */
+.mentes-eredmeny ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+  font-size: 0.88rem;
+}
+
+.mentes-eredmeny li + li {
+  margin-top: 3px;
 }

@@ -122,6 +122,7 @@
 
         <button type="submit" id="mentesGomb" class="gomb gomb-elsodleges gomb-teljes" disabled>📤 Mentés a Sheets-be</button>
         <p id="mentesInfo" class="megjegyzes"></p>
+        <div id="mentesEredmeny" class="allapot mentes-eredmeny" role="status" aria-live="polite" hidden></div>
       </form>
 
       <details class="fejlesztoi">
@@ -144,8 +145,15 @@
         <label for="modellMezo">Modell</label>
         <input type="text" id="modellMezo" placeholder="gemini-3.6-flash" spellcheck="false" autocapitalize="off">
 
+        <label for="scriptUrlMezo">Apps Script Web App URL</label>
+        <input type="url" id="scriptUrlMezo" placeholder="https://script.google.com/macros/s/…/exec" spellcheck="false" autocapitalize="off" inputmode="url">
+
+        <label for="tokenMezo">Hozzáférési token <span class="penznem-jel">(opcionális)</span></label>
+        <input type="password" id="tokenMezo" placeholder="csak ha az Apps Scriptben API_TOKEN-t állítottál be" spellcheck="false" autocapitalize="off">
+
         <p class="megjegyzes">
-          A kulcs csak ezen a telefonon, ebben a böngészőben tárolódik. A GitHubra nem kerül fel.
+          A kulcs, az URL és a token csak ezen a telefonon, ebben a böngészőben tárolódik. A GitHubra nem kerül fel.
+          A „Kulcs megjelenítése” a tokent is megmutatja.
         </p>
 
         <div class="gombsor">

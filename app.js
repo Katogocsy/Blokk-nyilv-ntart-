@@ -15,6 +15,8 @@ const kulcsMezo = document.getElementById("kulcsMezo");
 const kulcsMutat = document.getElementById("kulcsMutat");
 const modellMezo = document.getElementById("modellMezo");
 const kulcsTorles = document.getElementById("kulcsTorles");
+const scriptUrlMezo = document.getElementById("scriptUrlMezo");
+const tokenMezo = document.getElementById("tokenMezo");
 const valaszSzoveg = document.getElementById("valaszSzoveg");
 const figyelmeztetesLista = document.getElementById("figyelmeztetesLista");
 
@@ -34,6 +36,7 @@ const sorHozzaadas = document.getElementById("sorHozzaadas");
 const osszegFigyelmeztetes = document.getElementById("osszegFigyelmeztetes");
 const mentesGomb = document.getElementById("mentesGomb");
 const mentesInfo = document.getElementById("mentesInfo");
+const mentesEredmeny = document.getElementById("mentesEredmeny");
 
 // --- Konfiguráció ---
 // Elsőbbség: a telefonon mentett beállítás, utána a (helyi) config.js, végül az alapérték.
@@ -41,6 +44,8 @@ const GEMINI_API_ALAP = "https://generativelanguage.googleapis.com/v1beta/models
 const ALAP_MODELL = "gemini-3.6-flash";
 const TAROLO_KULCS = "blokk.geminiApiKey";
 const TAROLO_MODELL = "blokk.geminiModel";
+const TAROLO_SCRIPT_URL = "blokk.appsScriptUrl";
+const TAROLO_TOKEN = "blokk.apiToken";
 
 function taroloOlvas(nev) {
   try {
@@ -70,7 +75,8 @@ function getConfig() {
   return {
     GEMINI_API_KEY: taroloOlvas(TAROLO_KULCS) || ervenyesErtek(fajlbol.GEMINI_API_KEY),
     GEMINI_MODEL: taroloOlvas(TAROLO_MODELL) || ervenyesErtek(fajlbol.GEMINI_MODEL) || ALAP_MODELL,
-    APPS_SCRIPT_URL: ervenyesErtek(fajlbol.APPS_SCRIPT_URL),
+    APPS_SCRIPT_URL: taroloOlvas(TAROLO_SCRIPT_URL) || ervenyesErtek(fajlbol.APPS_SCRIPT_URL),
+    API_TOKEN: taroloOlvas(TAROLO_TOKEN) || ervenyesErtek(fajlbol.API_TOKEN),
   };
 }
 
@@ -110,12 +116,29 @@ function konfigHiba() {
 function beallitasokBetoltese() {
   kulcsMezo.value = taroloOlvas(TAROLO_KULCS);
   modellMezo.value = taroloOlvas(TAROLO_MODELL) || getConfig().GEMINI_MODEL;
+  scriptUrlMezo.value = taroloOlvas(TAROLO_SCRIPT_URL);
+  scriptUrlMezo.placeholder = getConfig().APPS_SCRIPT_URL
+    ? "a config.js-ben megadott URL-t használja"
+    : "https://script.google.com/macros/s/…/exec";
+  tokenMezo.value = taroloOlvas(TAROLO_TOKEN);
 }
 
 function beallitasokMentese(esemeny) {
   esemeny.preventDefault();
   const kulcs = kulcsMezo.value.trim();
   const modell = modellMezo.value.trim();
+  const scriptUrl = scriptUrlMezo.value.trim();
+  const token = tokenMezo.value.trim();
+
+  if (scriptUrl && !ervenyesScriptUrl(scriptUrl)) {
+    allapotBeallitas(
+      "Az Apps Script URL nem megfelelő. A bevezetéskor kapott, https://script.google.com/macros/s/… kezdetű " +
+        "és /exec végű címet másold be.",
+      "hiba"
+    );
+    scriptUrlMezo.focus();
+    return;
+  }
 
   if (!kulcs) {
     allapotBeallitas("Add meg az API kulcsot a mentéshez.", "figyelem");
@@ -125,7 +148,9 @@ function beallitasokMentese(esemeny) {
 
   const sikerult =
     taroloIr(TAROLO_KULCS, kulcs) &&
-    taroloIr(TAROLO_MODELL, modell && modell !== ALAP_MODELL ? modell : "");
+    taroloIr(TAROLO_MODELL, modell && modell !== ALAP_MODELL ? modell : "") &&
+    taroloIr(TAROLO_SCRIPT_URL, scriptUrl) &&
+    taroloIr(TAROLO_TOKEN, token);
 
   if (!sikerult) {
     allapotBeallitas(
@@ -137,7 +162,9 @@ function beallitasokMentese(esemeny) {
 
   kulcsMutat.checked = false;
   kulcsMezo.type = "password";
+  tokenMezo.type = "password";
   beallitasok.open = false;
+  if (blokkAllapot) mentesAllapotFrissites();
   allapotBeallitas(
     kivalasztottFajl
       ? "Beállítások elmentve. Nyomd meg az „Elemzés” gombot."
@@ -576,8 +603,9 @@ function urlapMegjelenitese(blokk, figyelmeztetesek) {
   figyelmeztetesLista.hidden = egyeb.length === 0;
 
   termekekKirajzolasa();
-  urlapFrissites();
   mentesInfo.textContent = "";
+  mentesEredmenyTorles();
+  urlapFrissites();
 
   elonezetKartya.hidden = true;
   ellenorzesKartya.hidden = false;
@@ -748,7 +776,7 @@ function mentesAllapotFrissites() {
   if (blokkAllapot.brutto_vegosszeg === null) hianyzik.push("bruttó végösszeg");
   const hibasMezok = blokkUrlap.querySelectorAll("input.hibas").length;
 
-  mentesGomb.disabled = hianyzik.length > 0 || hibasMezok > 0;
+  mentesGomb.disabled = mentesFolyamatban || hianyzik.length > 0 || hibasMezok > 0;
 
   if (hianyzik.length) {
     mentesGomb.title = `A mentéshez hiányzik: ${hianyzik.join(", ")}`;
@@ -797,17 +825,247 @@ function sorTorleseKattintas(esemeny) {
   urlapFrissites();
 }
 
-/** Mentés – a Sheets-integráció a következő lépésben kerül ide. */
-function mentesSheetsbe(esemeny) {
+// --- Mentés a Google Sheets-be (Apps Script Web App) ---
+
+/** Mennyi ideig várunk az Apps Script válaszára (ms). */
+const MENTES_IDOKORLAT_MS = 60000;
+
+/** Folyamatban lévő mentés – amíg igaz, a gomb nem nyomható meg újra. */
+let mentesFolyamatban = false;
+
+/** Érvényes Apps Script Web App URL-e (…/macros/s/…/exec). */
+function ervenyesScriptUrl(url) {
+  return /^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[A-Za-z0-9_-]+\/exec\/?$/.test(url);
+}
+
+/**
+ * Egyedi blokkazonosító a blokk tartalmából (SHA-256).
+ * Ugyanazzal a módszerrel számol, mint az Apps Script (Code.gs → blokkAzonosito_),
+ * így ugyanaz a blokk mindig ugyanazt az azonosítót kapja, és a szerver kiszűri a duplikátumot.
+ * Ha a böngésző nem tud SHA-256-ot számolni, null – ekkor a szerver képzi az azonosítót.
+ */
+async function blokkAzonositoSzamitasa(adat) {
+  if (!window.crypto || !crypto.subtle || !adat.datum) return null;
+  const normal = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const ujjlenyomat = JSON.stringify([
+    adat.datum,
+    normal(adat.bolt),
+    adat.brutto_vegosszeg,
+    adat.termekek.map((t) => [normal(t.termek_nev), t.mennyiseg, t.egysegar, t.reszosszeg]),
+  ]);
+  try {
+    const kivonat = new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ujjlenyomat))
+    );
+    const hex = Array.from(kivonat.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
+    return `B-${adat.datum.replace(/-/g, "")}-${hex.toUpperCase()}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Mentési hiba, a felhasználónak szóló üzenettel. */
+function mentesiHiba(uzenet, reszletek = [], bizonytalan = false) {
+  const hiba = new Error(uzenet);
+  hiba.reszletek = reszletek;
+  hiba.bizonytalan = bizonytalan; // lehet, hogy a szerver mégis elmentette
+  return hiba;
+}
+
+/**
+ * Egyetlen POST kérés az Apps Script Web App-nak. Szándékosan NINCS automatikus újrapróbálás,
+ * hogy ne keletkezzen duplikátum.
+ * @returns {Promise<object>} a szerver JSON-válasza (siker: true esetén)
+ */
+async function kuldesAppsScriptnek(url, adat) {
+  const megszakito = new AbortController();
+  const idozito = setTimeout(() => megszakito.abort(), MENTES_IDOKORLAT_MS);
+
+  let valasz;
+  try {
+    valasz = await fetch(url, {
+      method: "POST",
+      // text/plain: így a böngésző nem küld előzetes (preflight) CORS-kérést,
+      // amit az Apps Script nem tud kezelni. A törzs ettől még JSON.
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(adat),
+      redirect: "follow",
+      signal: megszakito.signal,
+    });
+  } catch (h) {
+    if (h.name === "AbortError") {
+      throw mentesiHiba(
+        `Nem érkezett válasz ${MENTES_IDOKORLAT_MS / 1000} másodpercen belül.`, [], true
+      );
+    }
+    if (navigator.onLine === false) {
+      throw mentesiHiba("Nincs internetkapcsolat. Kapcsold be a netet, majd nyomd meg újra a mentést.");
+    }
+    throw mentesiHiba(
+      "Hálózati hiba: nem sikerült elérni az Apps Scriptet.",
+      [
+        "Ellenőrizd az internetkapcsolatot.",
+        "Ellenőrizd, hogy a Beállításokban jó-e a Web App URL (…/exec a vége).",
+        "A bevezetésnél a „Ki férhet hozzá” legyen „Bárki”.",
+      ],
+      true
+    );
+  } finally {
+    clearTimeout(idozito);
+  }
+
+  if (valasz.status === 429) {
+    throw mentesiHiba(
+      "Túl sok kérés (429): a Google átmenetileg korlátozza a mentést. Várj 1–2 percet, majd nyomd meg újra."
+    );
+  }
+  if (valasz.status >= 500) {
+    throw mentesiHiba(
+      `A Google szervere hibát jelzett (${valasz.status}). Várj egy kicsit, majd próbáld újra.`,
+      [],
+      true
+    );
+  }
+  if (!valasz.ok) {
+    throw mentesiHiba(
+      `Az Apps Script hibával válaszolt (HTTP ${valasz.status}).`,
+      valasz.status === 401 || valasz.status === 403 || valasz.status === 404
+        ? ["Ellenőrizd a Web App URL-t, és hogy a bevezetésnél a hozzáférés „Bárki”."]
+        : []
+    );
+  }
+
+  const szoveg = await valasz.text();
+  let json;
+  try {
+    json = JSON.parse(szoveg);
+  } catch {
+    console.error("Apps Script nem JSON választ adott:", szoveg.slice(0, 500));
+    throw mentesiHiba(
+      "Az Apps Script nem a várt választ adta (nem JSON).",
+      [
+        "Ellenőrizd, hogy a URL a …/exec végű Web App cím-e.",
+        "A bevezetésnél a „Ki férhet hozzá” legyen „Bárki”.",
+        "Kódmódosítás után új verziót kell bevezetni (Bevezetések kezelése → ✏️ → Új verzió).",
+      ],
+      true
+    );
+  }
+
+  console.log("Apps Script válasz:", json);
+
+  if (!json || json.siker !== true) {
+    throw mentesiHiba(json?.uzenet || "Ismeretlen hiba történt a mentéskor.", json?.reszletek || []);
+  }
+  return json;
+}
+
+/** Eredmény/hiba megjelenítése a mentés gomb alatt. */
+function mentesEredmenyBeallitas(szoveg, tipus, reszletek = []) {
+  mentesEredmeny.replaceChildren(document.createTextNode(szoveg));
+  if (reszletek.length) {
+    const lista = document.createElement("ul");
+    reszletek.forEach((r) => lista.append(Object.assign(document.createElement("li"), { textContent: r })));
+    mentesEredmeny.append(lista);
+  }
+  mentesEredmeny.className = "allapot mentes-eredmeny " + tipus;
+  mentesEredmeny.hidden = false;
+}
+
+function mentesEredmenyTorles() {
+  mentesEredmeny.hidden = true;
+  mentesEredmeny.replaceChildren();
+}
+
+/** Sikeres mentés után: az űrlap és a kiválasztott kép törlése, készen a következő blokkra. */
+function urlapTorlese() {
+  urlapElrejtese();
+  mentesEredmenyTorles();
+  if (elonezetUrl) URL.revokeObjectURL(elonezetUrl);
+  elonezetUrl = null;
+  kivalasztottFajl = null;
+  elonezetKep.removeAttribute("src");
+  elonezetKep.hidden = true;
+  kisKep.removeAttribute("src");
+  elonezetUres.textContent = "Még nincs kiválasztott kép.";
+  elonezetUres.hidden = false;
+  fajlInfo.textContent = "";
+  elemzesGomb.disabled = true;
+  blokkUrlap.reset();
+  termekTorzs.replaceChildren();
+  valaszSzoveg.textContent = "";
+}
+
+/** „Mentés a Sheets-be” gomb. */
+async function mentesSheetsbe(esemeny) {
   esemeny.preventDefault();
+  if (mentesFolyamatban) return; // dupla koppintás ellen
   mentesAllapotFrissites();
   if (mentesGomb.disabled) return;
 
+  const cfg = getConfig();
+  if (!cfg.APPS_SCRIPT_URL) {
+    mentesEredmenyBeallitas(
+      "Még nincs megadva az Apps Script Web App URL. Add meg lent a ⚙️ Beállításokban.",
+      "figyelem"
+    );
+    beallitasok.open = true;
+    scriptUrlMezo.focus();
+    return;
+  }
+
+  const kuldottBlokk = blokkAllapot;
   const adat = mentendoAdat();
-  console.log("Mentésre kész adatok:", adat);
-  // TODO: elküldés az Apps Script Web App-nak (APPS_SCRIPT_URL)
-  mentesInfo.textContent =
-    "✅ Az adatok rendben vannak. A Google Sheets-mentés a következő lépésben kerül bekötésre.";
+  const blokkAzonosito = await blokkAzonositoSzamitasa(adat);
+  const kuldendo = { ...adat };
+  if (blokkAzonosito) kuldendo.blokk_azonosito = blokkAzonosito;
+  if (cfg.API_TOKEN) kuldendo.token = cfg.API_TOKEN;
+
+  console.log("Mentés az Apps Scriptbe:", { ...kuldendo, token: kuldendo.token ? "***" : undefined });
+
+  mentesFolyamatban = true;
+  const eredetiFelirat = mentesGomb.textContent;
+  mentesGomb.disabled = true;
+  mentesGomb.textContent = "⏳ Mentés folyamatban…";
+  mentesInfo.textContent = "";
+  mentesEredmenyBeallitas("Mentés folyamatban, várj a válaszra…", "info");
+
+  try {
+    const json = await kuldesAppsScriptnek(cfg.APPS_SCRIPT_URL, kuldendo);
+
+    // Ha mentés közben a felhasználó már új blokkot választott, azt ne töröljük
+    if (blokkAllapot === kuldottBlokk) urlapTorlese();
+
+    if (json.duplikalt) {
+      allapotBeallitas(
+        `Ez a blokk már korábban mentve volt (${json.blokk_azonosito}), ezért nem került be újra. ` +
+          "Jöhet a következő blokk.",
+        "figyelem"
+      );
+    } else {
+      allapotBeallitas(
+        `✅ Sikeresen mentve: ${json.mentett_sorok} sor a táblázatba (${json.blokk_azonosito}). ` +
+          "Jöhet a következő blokk.",
+        "siker"
+      );
+    }
+    allapot.scrollIntoView({ behavior: "smooth", block: "center" });
+  } catch (hiba) {
+    console.error("Mentési hiba:", hiba);
+    const reszletek = [...(hiba.reszletek || [])];
+    if (hiba.bizonytalan) {
+      reszletek.push(
+        "Lehet, hogy a mentés mégis megtörtént – nézd meg a táblázatot. Ha nincs benne, nyomd meg újra " +
+          "a mentést: ugyanazt a blokkot a rendszer nem írja be kétszer."
+      );
+    }
+    mentesEredmenyBeallitas("❌ Mentés sikertelen: " + hiba.message, "hiba", reszletek);
+    allapotBeallitas("A mentés nem sikerült – a részleteket lent, a mentés gomb alatt látod.", "hiba");
+  } finally {
+    mentesFolyamatban = false;
+    mentesGomb.textContent = eredetiFelirat;
+    if (blokkAllapot) mentesAllapotFrissites();
+  }
 }
 
 /** Elemzés gomb kezelése. */
@@ -870,6 +1128,7 @@ beallitasForm.addEventListener("submit", beallitasokMentese);
 kulcsTorles.addEventListener("click", kulcsTorlese);
 kulcsMutat.addEventListener("change", () => {
   kulcsMezo.type = kulcsMutat.checked ? "text" : "password";
+  tokenMezo.type = kulcsMutat.checked ? "text" : "password";
 });
 
 beallitasokBetoltese();
