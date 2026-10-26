@@ -15,6 +15,7 @@ Egyszerű, mobilbarát webalkalmazás bevásárlási blokkok nyilvántartására
 - 🏷️ **Kategóriák** – a Gemini minden termékhez kategóriát választ egy fix listából (Élelmiszer, Ital, Háztartás, …, Egyéb), ami az űrlapon legördülő menüből javítható, és a táblázat Kategória oszlopába kerül
 - ➕ **Automatikus összegzés** – a termékek összege azonnal újraszámolódik; mennyiség vagy egységár módosításakor a részösszeg is; eltérés esetén sárga figyelmeztetés
 - 📤 **Mentés a Sheets-be** – csak akkor aktív, ha van bolt, dátum és bruttó végösszeg; az adatokat a blokkazonosítóval együtt elküldi az Apps Script Web App-nak, sikeres mentés után törli az űrlapot. Hibánál (hálózat, 429, 500, elutasítás) kiírja az okát. Automatikusan nem küldi újra; a kézi újraküldés biztonságos, mert ugyanaz a blokk nem kerül be kétszer.
+- 📊 **Heti összesítő fül** – a Google Sheets „Heti összesítő” lapját olvassa be (csak olvas): e heti és előző heti költés, változás forintban és százalékban, top 5 kategória és bolt, frissítés gombbal
 - ℹ️ **Állapotjelző** szöveg
 
 
@@ -28,6 +29,8 @@ Egyszerű, mobilbarát webalkalmazás bevásárlási blokkok nyilvántartására
 | `config.example.js` | Konfigurációs minta (API kulcs, modell, Apps Script URL, token) |
 | `apps-script/Code.gs` | A Google Sheets oldali Web App (ezt az Apps Scriptbe kell bemásolni) |
 | `apps-script/UTMUTATO.md` | Az Apps Script beállítása lépésről lépésre |
+| `apps-script/HETI_OSSZESITO.md` | Heti összesítő lap, képletek, a telefonos nézet GET végpontja |
+| `apps-script/HAVI_OSSZESITO.md` | Havi összesítő lap, képletek, pivot tábla |
 | `.gitignore` | Kizárja a saját `config.js`-t a verziókezelésből |
 
 ## Beállítás

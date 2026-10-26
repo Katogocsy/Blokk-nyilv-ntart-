@@ -38,6 +38,25 @@ const mentesGomb = document.getElementById("mentesGomb");
 const mentesInfo = document.getElementById("mentesInfo");
 const mentesEredmeny = document.getElementById("mentesEredmeny");
 
+const fulRogzites = document.getElementById("fulRogzites");
+const fulHeti = document.getElementById("fulHeti");
+const nezetRogzites = document.getElementById("nezetRogzites");
+const nezetHeti = document.getElementById("nezetHeti");
+const hetiCim = document.getElementById("hetiCim");
+const hetiIdoszak = document.getElementById("hetiIdoszak");
+const hetiFrissites = document.getElementById("hetiFrissites");
+const hetiAllapot = document.getElementById("hetiAllapot");
+const hetiTartalom = document.getElementById("hetiTartalom");
+const mEHet = document.getElementById("mEHet");
+const mEHetAl = document.getElementById("mEHetAl");
+const mElozo = document.getElementById("mElozo");
+const mElozoAl = document.getElementById("mElozoAl");
+const mValtFt = document.getElementById("mValtFt");
+const mValtSzaz = document.getElementById("mValtSzaz");
+const topKategoriak = document.getElementById("topKategoriak");
+const topBoltok = document.getElementById("topBoltok");
+const hetiFrissitve = document.getElementById("hetiFrissitve");
+
 // --- Konfiguráció ---
 // Elsőbbség: a telefonon mentett beállítás, utána a (helyi) config.js, végül az alapérték.
 const GEMINI_API_ALAP = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -1173,6 +1192,8 @@ async function mentesSheetsbe(esemeny) {
   try {
     const json = await kuldesAppsScriptnek(cfg.APPS_SCRIPT_URL, kuldendo);
 
+    hetiElavult = true; // a heti összesítő a következő megnyitáskor frissüljön
+
     // Ha mentés közben a felhasználó már új blokkot választott, azt ne töröljük
     if (blokkAllapot === kuldottBlokk) urlapTorlese();
 
@@ -1251,6 +1272,244 @@ async function elemzes() {
   }
 }
 
+// --- Nézetváltás (Rögzítés / Heti összesítő) ---
+
+const TAROLO_NEZET = "blokk.nezet";
+const HETI_IDOKORLAT_MS = 30000;
+/** Ennyi idő után a fülre váltáskor magától újratölti a heti adatokat. */
+const HETI_ELAVULAS_MS = 2 * 60 * 1000;
+
+let hetiBetoltve = 0; // utolsó sikeres betöltés ideje (ms)
+let hetiElavult = true; // mentés után igaz, hogy a következő megnyitáskor frissüljön
+let hetiToltes = false;
+
+const PENZ_FORMATUM = new Intl.NumberFormat("hu-HU", { maximumFractionDigits: 0 });
+
+function penz(osszeg, elojel = false) {
+  if (osszeg === null || osszeg === undefined) return "–";
+  const s = PENZ_FORMATUM.format(Math.round(osszeg)) + " Ft";
+  return elojel && osszeg > 0 ? "+" + s : s;
+}
+
+function szazalekFormazas(arany, elojel = false) {
+  if (arany === null || arany === undefined) return "–";
+  const s = new Intl.NumberFormat("hu-HU", { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(arany * 100) + "%";
+  return elojel && arany > 0 ? "+" + s : s;
+}
+
+/** „2026-10-26” → „okt. 26.” */
+function rovidDatum(iso) {
+  if (!iso) return "?";
+  const [e, h, n] = iso.split("-").map(Number);
+  return new Intl.DateTimeFormat("hu-HU", { month: "short", day: "numeric" }).format(new Date(e, h - 1, n));
+}
+
+function nezetValtas(nezet, mentes = true) {
+  const heti = nezet === "heti";
+  nezetRogzites.hidden = heti;
+  nezetHeti.hidden = !heti;
+  fulRogzites.setAttribute("aria-selected", String(!heti));
+  fulHeti.setAttribute("aria-selected", String(heti));
+  if (mentes) taroloIr(TAROLO_NEZET, heti ? "heti" : "");
+  if (heti && (hetiElavult || Date.now() - hetiBetoltve > HETI_ELAVULAS_MS)) {
+    hetiOsszesitoBetoltese();
+  }
+}
+
+/** A heti nézet állapotsora (üzenet + opcionális lista + opcionális gomb). */
+function hetiAllapotBeallitas(szoveg, tipus, lista = [], gomb = null) {
+  if (!szoveg) {
+    hetiAllapot.hidden = true;
+    hetiAllapot.replaceChildren();
+    return;
+  }
+  hetiAllapot.replaceChildren(document.createTextNode(szoveg));
+  if (lista.length) {
+    const ul = document.createElement("ul");
+    lista.forEach((l) => ul.append(Object.assign(document.createElement("li"), { textContent: l })));
+    hetiAllapot.append(ul);
+  }
+  if (gomb) hetiAllapot.append(gomb);
+  hetiAllapot.className = "allapot " + tipus;
+  hetiAllapot.hidden = false;
+}
+
+function beallitasokGomb() {
+  const gomb = document.createElement("button");
+  gomb.type = "button";
+  gomb.className = "gomb gomb-masodlagos gomb-teljes heti-beallitas-gomb";
+  gomb.textContent = "⚙️ Beállítások megnyitása";
+  gomb.addEventListener("click", () => {
+    nezetValtas("rogzites");
+    beallitasok.open = true;
+    beallitasok.scrollIntoView({ behavior: "smooth", block: "start" });
+    scriptUrlMezo.focus({ preventScroll: true });
+  });
+  return gomb;
+}
+
+/**
+ * A heti összesítő lekérése az Apps Script GET végpontjáról (…/exec?muvelet=heti).
+ * Csak olvas – a táblázatban semmit nem módosít.
+ */
+async function hetiAdatLekerese(cfg) {
+  const url = new URL(cfg.APPS_SCRIPT_URL);
+  url.searchParams.set("muvelet", "heti");
+  if (cfg.API_TOKEN) url.searchParams.set("token", cfg.API_TOKEN);
+
+  const megszakito = new AbortController();
+  const idozito = setTimeout(() => megszakito.abort(), HETI_IDOKORLAT_MS);
+  let valasz;
+  try {
+    valasz = await fetch(url, { method: "GET", redirect: "follow", cache: "no-store", signal: megszakito.signal });
+  } catch (h) {
+    if (h.name === "AbortError") throw mentesiHiba("Nem érkezett válasz a táblázattól 30 másodpercen belül.");
+    if (navigator.onLine === false) throw mentesiHiba("Nincs internetkapcsolat.");
+    throw mentesiHiba("Hálózati hiba: nem sikerült elérni az Apps Scriptet.", [
+      "Ellenőrizd az internetkapcsolatot és a Beállításokban a Web App URL-t.",
+      "A bevezetésnél a „Ki férhet hozzá” legyen „Bárki”.",
+    ]);
+  } finally {
+    clearTimeout(idozito);
+  }
+
+  if (valasz.status === 429) throw mentesiHiba("Túl sok kérés (429). Várj egy percet, majd frissíts.");
+  if (valasz.status >= 500) throw mentesiHiba(`A Google szervere hibát jelzett (${valasz.status}). Próbáld újra kicsit később.`);
+  if (!valasz.ok) throw mentesiHiba(`Az Apps Script hibával válaszolt (HTTP ${valasz.status}).`);
+
+  const szoveg = await valasz.text();
+  let json;
+  try {
+    json = JSON.parse(szoveg);
+  } catch {
+    console.error("Apps Script nem JSON választ adott:", szoveg.slice(0, 500));
+    throw mentesiHiba("Az Apps Script nem a várt választ adta.", [
+      "Ellenőrizd, hogy a Beállításokban a …/exec végű Web App URL szerepel-e.",
+      "Az Apps Scriptben vezesd be az új verziót (Bevezetések kezelése → ✏️ → Új verzió).",
+    ]);
+  }
+  console.log("Heti összesítő:", json);
+
+  if (!json || json.siker !== true) {
+    throw mentesiHiba(json?.uzenet || "Ismeretlen hiba történt.", json?.reszletek || []);
+  }
+  if (!json.het || !json.e_het) {
+    // A régi Code.gs a ?muvelet=heti paramétert még nem ismeri, csak az állapotüzenetet adja vissza
+    throw mentesiHiba("Az Apps Script még nem ismeri a heti összesítő lekérését.", [
+      "Másold be az új Code.gs-t, majd vezesd be az új verziót (Bevezetések kezelése → ✏️ → Új verzió → Bevezetés).",
+    ]);
+  }
+  return json;
+}
+
+async function hetiOsszesitoBetoltese() {
+  if (hetiToltes) return;
+  const cfg = getConfig();
+  if (!cfg.APPS_SCRIPT_URL) {
+    hetiTartalom.hidden = true;
+    hetiAllapotBeallitas(
+      "A heti összesítőhöz add meg az Apps Script Web App URL-t a Beállításokban.",
+      "figyelem",
+      [],
+      beallitasokGomb()
+    );
+    return;
+  }
+
+  hetiToltes = true;
+  hetiFrissites.classList.add("toltes");
+  hetiFrissites.textContent = "⏳ Betöltés…";
+  hetiFrissites.disabled = true;
+  hetiAllapotBeallitas("Adatok betöltése a táblázatból…", "info");
+
+  try {
+    const adat = await hetiAdatLekerese(cfg);
+    hetiKirajzolasa(adat);
+    hetiBetoltve = Date.now();
+    hetiElavult = false;
+
+    const megjegyzesek = [...(adat.figyelmeztetesek || [])];
+    if (!adat.het.aktualis_het && !adat.het.elavult) {
+      megjegyzesek.unshift(
+        "A táblázatban (Heti összesítő, B4 cella) nem az aktuális hét van kiválasztva. " +
+          "Az aktuális héthez írd vissza oda: =TODAY()"
+      );
+    }
+    if (megjegyzesek.length) {
+      hetiAllapotBeallitas("Figyelem:", "figyelem", megjegyzesek);
+    } else {
+      hetiAllapotBeallitas("", "");
+    }
+  } catch (hiba) {
+    console.error("Heti összesítő hiba:", hiba);
+    hetiAllapotBeallitas("❌ " + hiba.message, "hiba", hiba.reszletek || []);
+  } finally {
+    hetiToltes = false;
+    hetiFrissites.classList.remove("toltes");
+    hetiFrissites.textContent = "🔄 Frissítés";
+    hetiFrissites.disabled = false;
+  }
+}
+
+function toplistaKirajzolasa(lista, tetelek, uresSzoveg) {
+  if (!tetelek.length) {
+    lista.replaceChildren(Object.assign(document.createElement("li"), { className: "top-ures", textContent: uresSzoveg }));
+    return;
+  }
+  const maxOsszeg = Math.max(...tetelek.map((t) => t.osszeg), 1);
+  lista.replaceChildren(
+    ...tetelek.map((t, i) => {
+      const li = document.createElement("li");
+      li.className = "top-tetel";
+
+      const helyezes = Object.assign(document.createElement("span"), { className: "top-helyezes", textContent: String(i + 1) });
+      const nev = Object.assign(document.createElement("span"), { className: "top-nev", textContent: t.nev, title: t.nev });
+      const osszeg = Object.assign(document.createElement("span"), { className: "top-osszeg", textContent: penz(t.osszeg) });
+
+      const savHely = document.createElement("div");
+      savHely.className = "top-sav-hely";
+      const sav = document.createElement("div");
+      sav.className = "top-sav";
+      sav.style.width = Math.max(2, Math.round((Math.max(t.osszeg, 0) / maxOsszeg) * 100)) + "%";
+      savHely.append(sav);
+
+      const arany = Object.assign(document.createElement("span"), {
+        className: "top-arany",
+        textContent: szazalekFormazas(t.arany),
+      });
+
+      li.append(helyezes, nev, osszeg, savHely, arany);
+      return li;
+    })
+  );
+}
+
+function hetiKirajzolasa(adat) {
+  const { het, e_het: eHet, elozo_het: elozo, valtozas } = adat;
+
+  hetiCim.textContent = het.het_szama ? `${het.het_szama}. hét` : "Heti összesítő";
+  hetiIdoszak.textContent = `${rovidDatum(het.kezdete)} – ${rovidDatum(het.vege)}` + (het.aktualis_het ? " · e hét" : "");
+
+  mEHet.textContent = penz(eHet.koltes);
+  mEHetAl.textContent =
+    eHet.blokkok === null ? "" : eHet.blokkok === 0 ? "Még nincs blokk ezen a héten" : `${eHet.blokkok} blokk · átlag ${penz(eHet.atlagos_blokk)}`;
+  mElozo.textContent = penz(elozo.koltes);
+  mElozoAl.textContent = elozo.blokkok === null ? "" : `${elozo.blokkok} blokk`;
+
+  const irany = valtozas.forint > 0 ? "tobb" : valtozas.forint < 0 ? "kevesebb" : "";
+  mValtFt.textContent = penz(valtozas.forint, true);
+  mValtFt.className = "mutato-ertek kisebb " + irany;
+  mValtSzaz.textContent = valtozas.szazalek === null ? "nincs összevethető előző hét" : szazalekFormazas(valtozas.szazalek, true);
+  mValtSzaz.className = "valtozas-jel " + (valtozas.szazalek === null ? "" : irany);
+
+  toplistaKirajzolasa(topKategoriak, adat.top_kategoriak || [], "Ezen a héten még nincs adat.");
+  toplistaKirajzolasa(topBoltok, adat.top_boltok || [], "Ezen a héten még nincs adat.");
+
+  const ido = new Intl.DateTimeFormat("hu-HU", { hour: "2-digit", minute: "2-digit" }).format(new Date());
+  hetiFrissitve.textContent = `Frissítve: ${ido} · forrás: Google Sheets, „Heti összesítő” lap`;
+  hetiTartalom.hidden = false;
+}
+
 // --- Eseménykezelők ---
 kameraInput.addEventListener("change", inputValtozas);
 feltoltesInput.addEventListener("change", inputValtozas);
@@ -1264,6 +1523,10 @@ sorHozzaadas.addEventListener("click", sorHozzaadasa);
 termekTorzs.addEventListener("click", sorTorleseKattintas);
 kisKep.addEventListener("click", kepNagyitas);
 
+fulRogzites.addEventListener("click", () => nezetValtas("rogzites"));
+fulHeti.addEventListener("click", () => nezetValtas("heti"));
+hetiFrissites.addEventListener("click", hetiOsszesitoBetoltese);
+
 // Jelzés az index.html-nek, hogy a szkript betöltődött
 window.BLOKK_APP_BETOLTVE = true;
 
@@ -1276,6 +1539,7 @@ kulcsMutat.addEventListener("change", () => {
 });
 
 beallitasokBetoltese();
+if (taroloOlvas(TAROLO_NEZET) === "heti") nezetValtas("heti", false);
 const indulasiHiba = konfigHiba();
 if (indulasiHiba) {
   allapotBeallitas(indulasiHiba, "figyelem");

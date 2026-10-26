@@ -14,6 +14,12 @@
   </header>
 
   <main class="tartalom">
+    <nav class="nezet-valto" role="tablist" aria-label="Nézetek">
+      <button type="button" role="tab" id="fulRogzites" class="ful" aria-selected="true" aria-controls="nezetRogzites">🧾 Rögzítés</button>
+      <button type="button" role="tab" id="fulHeti" class="ful" aria-selected="false" aria-controls="nezetHeti">📊 Heti összesítő</button>
+    </nav>
+
+    <div id="nezetRogzites" class="nezet" role="tabpanel" aria-labelledby="fulRogzites">
     <section class="kartya">
       <h2>1. Kép kiválasztása</h2>
 
@@ -163,6 +169,52 @@
         </div>
       </form>
     </details>
+    </div>
+
+    <div id="nezetHeti" class="nezet" role="tabpanel" aria-labelledby="fulHeti" hidden>
+      <section class="kartya heti-fej">
+        <div class="heti-cim-sor">
+          <div>
+            <h2 id="hetiCim">Heti összesítő</h2>
+            <p id="hetiIdoszak" class="megjegyzes heti-idoszak"></p>
+          </div>
+          <button type="button" id="hetiFrissites" class="gomb gomb-masodlagos frissites-gomb">🔄 Frissítés</button>
+        </div>
+        <div id="hetiAllapot" class="allapot" role="status" aria-live="polite" hidden></div>
+      </section>
+
+      <div id="hetiTartalom" class="nezet" hidden>
+        <div class="mutato-racs">
+          <section class="kartya mutato mutato-fo">
+            <span class="mutato-cim">E heti költés</span>
+            <span id="mEHet" class="mutato-ertek">–</span>
+            <span id="mEHetAl" class="mutato-al"></span>
+          </section>
+          <section class="kartya mutato">
+            <span class="mutato-cim">Előző heti költés</span>
+            <span id="mElozo" class="mutato-ertek kisebb">–</span>
+            <span id="mElozoAl" class="mutato-al"></span>
+          </section>
+          <section class="kartya mutato">
+            <span class="mutato-cim">Változás</span>
+            <span id="mValtFt" class="mutato-ertek kisebb">–</span>
+            <span id="mValtSzaz" class="valtozas-jel"></span>
+          </section>
+        </div>
+
+        <section class="kartya">
+          <h2>Top 5 kategória</h2>
+          <ol id="topKategoriak" class="top-lista"></ol>
+        </section>
+
+        <section class="kartya">
+          <h2>Top 5 bolt</h2>
+          <ol id="topBoltok" class="top-lista"></ol>
+        </section>
+
+        <p id="hetiFrissitve" class="megjegyzes kozepre"></p>
+      </div>
+    </div>
   </main>
 
   <footer class="lablec">
