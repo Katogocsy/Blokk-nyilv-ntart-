@@ -12,6 +12,7 @@ Egyszerű, mobilbarát webalkalmazás bevásárlási blokkok nyilvántartására
 - 🔍 **Elemzés** – a Gemini Flash strukturált JSON-ban adja vissza a blokk adatait (bolt, dátum, pénznem, összegek, fizetési mód, OCR-bizalom, termékek); a JSON ideiglenesen a képernyőn is megjelenik
 - ✅ **Ellenőrzés** – ha a tételek összege nem egyezik a bruttó végösszeggel, vagy a dátum nem YYYY-MM-DD, figyelmeztet, és az OCR-bizalmat „alacsony”-ra állítja
 - 📝 **Ellenőrző űrlap** – a felismert adatok szerkeszthetők (bolt, dátum, bruttó végösszeg, ÁFA, fizetési mód), a termékek táblázatban (név, mennyiség, egységár, részösszeg), sor hozzáadása/törlése; a blokk képe kis előnézetben látszik (koppintásra nagyítható)
+- 🏷️ **Kategóriák** – a Gemini minden termékhez kategóriát választ egy fix listából (Élelmiszer, Ital, Háztartás, …, Egyéb), ami az űrlapon legördülő menüből javítható, és a táblázat Kategória oszlopába kerül
 - ➕ **Automatikus összegzés** – a termékek összege azonnal újraszámolódik; mennyiség vagy egységár módosításakor a részösszeg is; eltérés esetén sárga figyelmeztetés
 - 📤 **Mentés a Sheets-be** – csak akkor aktív, ha van bolt, dátum és bruttó végösszeg; az adatokat a blokkazonosítóval együtt elküldi az Apps Script Web App-nak, sikeres mentés után törli az űrlapot. Hibánál (hálózat, 429, 500, elutasítás) kiírja az okát. Automatikusan nem küldi újra; a kézi újraküldés biztonságos, mert ugyanaz a blokk nem kerül be kétszer.
 - ℹ️ **Állapotjelző** szöveg

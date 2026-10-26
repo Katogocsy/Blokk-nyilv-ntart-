@@ -263,6 +263,13 @@ function fajlBase64Re(fajl) {
 
 const BIZALOM_ERTEKEK = ["magas", "kozepes", "alacsony"];
 
+/**
+ * A termékkategóriák fix listája. Ugyanez a lista van a Code.gs-ben is (a táblázat legördülő
+ * listájához) – ha módosítod, mindkét helyen módosítsd.
+ */
+const KATEGORIAK = ["Élelmiszer", "Ital", "Háztartás", "Drogéria és szépségápolás", "Ruházat és cipő", "Egészség", "Elektronika", "Otthon és kert", "Szabadidő és sport", "Betétdíj", "Egyéb"];
+const ALAP_KATEGORIA = "Egyéb";
+
 /** A válasz sémája a Gemini számára (OpenAPI-részhalmaz, ahogy a responseSchema várja). */
 const BLOKK_SEMA = {
   type: "OBJECT",
@@ -285,9 +292,10 @@ const BLOKK_SEMA = {
           mennyisegi_egyseg: { type: "STRING", nullable: true },
           egysegar: { type: "NUMBER", nullable: true },
           reszosszeg: { type: "NUMBER", nullable: true },
+          kategoria: { type: "STRING", enum: KATEGORIAK },
         },
-        required: ["termek_nev", "mennyiseg", "mennyisegi_egyseg", "egysegar", "reszosszeg"],
-        propertyOrdering: ["termek_nev", "mennyiseg", "mennyisegi_egyseg", "egysegar", "reszosszeg"],
+        required: ["termek_nev", "mennyiseg", "mennyisegi_egyseg", "egysegar", "reszosszeg", "kategoria"],
+        propertyOrdering: ["termek_nev", "mennyiseg", "mennyisegi_egyseg", "egysegar", "reszosszeg", "kategoria"],
       },
     },
   },
@@ -319,7 +327,8 @@ Olvasd ki az adatait, és KIZÁRÓLAG egy JSON objektumot adj vissza, ezekkel a 
       "mennyiseg": number | null,
       "mennyisegi_egyseg": string | null,   // pl. "db", "kg", "l"
       "egysegar": number | null,
-      "reszosszeg": number | null           // a tétel sorának végösszege
+      "reszosszeg": number | null,          // a tétel sorának végösszege
+      "kategoria": string                   // a lenti kategórialista egyik eleme
     }
   ]
 }
@@ -331,7 +340,19 @@ Szabályok:
 - A kedvezményeket, engedményeket, visszáru- és betétdíj-sorokat külön tételként vedd fel, negatív "reszosszeg"-gel, ha a blokkon levonásként szerepelnek.
 - A termékkódokat, vonalkódokat, ÁFA-kulcs jelöléseket ne tedd bele a termék nevébe.
 - Az "ocr_bizalom" azt mutassa, mennyire biztos a kiolvasás: "magas", ha minden fontos adat jól olvasható; "kozepes", ha néhány adat bizonytalan; "alacsony", ha sok adat olvashatatlan.
-- Ha a termékek "reszosszeg" értékeinek összege nem egyezik közelítőleg a "brutto_vegosszeg"-gel, az "ocr_bizalom" legyen "alacsony".`;
+- Ha a termékek "reszosszeg" értékeinek összege nem egyezik közelítőleg a "brutto_vegosszeg"-gel, az "ocr_bizalom" legyen "alacsony".
+
+Kategóriák – minden termékhez PONTOSAN EGYET válassz ebből a listából (betűre egyezően):
+${KATEGORIAK.map((k) => "- " + k).join("\n")}
+
+Kategorizálási szabályok:
+- A termék neve (és a bolt típusa) alapján dönts; a blokkokon a nevek gyakran rövidítettek (pl. "ÍR VAJ" → Élelmiszer, "SZÖRP NARANCS" → Ital, "TOM TAILOR T-SHIRT" → Ruházat és cipő).
+- Ital: üdítő, víz, szörp, kávé, tea, sör, bor, szeszes ital. Minden más étel: Élelmiszer.
+- Drogéria és szépségápolás: tisztálkodás, kozmetikum, pelenka. Háztartás: tisztítószer, mosószer, papíráru, eldobható eszközök.
+- Egészség: gyógyszer, vitamin, gyógyászati termék.
+- Betétdíj: üveg- és palackbetétdíj, visszaváltási díj (pl. "Visszav.díj").
+- Kedvezmény, engedmény, kupon sorához annak a terméknek a kategóriáját add, amelyikre a kedvezmény vonatkozik (általában a közvetlenül előtte lévő tétel); ha nem egyértelmű, "Egyéb".
+- Ha bizonytalan vagy, "Egyéb".`;
 
 /** A válasz szöveges részének kinyerése (a „gondolkodás” részeket kihagyva). */
 function valaszSzovege(adat) {
@@ -389,6 +410,7 @@ function blokkNormalizalasa(nyers) {
       mennyisegi_egyseg: szovegVagyNull(t?.mennyisegi_egyseg),
       egysegar: szamVagyNull(t?.egysegar),
       reszosszeg: szamVagyNull(t?.reszosszeg),
+      kategoria: KATEGORIAK.includes(t?.kategoria) ? t.kategoria : ALAP_KATEGORIA,
     })),
   };
 }
@@ -770,6 +792,15 @@ function termekSor(termek, index) {
     }));
   }
 
+  const kategoria = document.createElement("select");
+  kategoria.dataset.termek = "kategoria";
+  kategoria.setAttribute("aria-label", `${sorszam}. termék kategóriája`);
+  const lista = KATEGORIAK.includes(termek.kategoria) || !termek.kategoria
+    ? KATEGORIAK
+    : [termek.kategoria, ...KATEGORIAK];
+  kategoria.append(...lista.map((k) => new Option(k, k)));
+  kategoria.value = termek.kategoria || ALAP_KATEGORIA;
+
   const torles = document.createElement("button");
   torles.type = "button";
   torles.className = "sor-torles";
@@ -780,6 +811,7 @@ function termekSor(termek, index) {
 
   tr.append(
     cella("oszlop-nev", nev),
+    cella("oszlop-kat", kategoria),
     mennyCella,
     cella("oszlop-ar", szamInput("egysegar", termek.egysegar, `${sorszam}. termék egységára`)),
     cella("oszlop-resz", szamInput("reszosszeg", termek.reszosszeg, `${sorszam}. termék részösszege`)),
@@ -793,7 +825,7 @@ function termekekKirajzolasa() {
   if (sorok.length === 0) {
     const tr = document.createElement("tr");
     const td = cella("ures-tabla", "Nincs termék. A „Sor hozzáadása” gombbal vehetsz fel újat.");
-    td.colSpan = 5;
+    td.colSpan = 6;
     tr.append(td);
     sorok.push(tr);
   }
@@ -803,7 +835,7 @@ function termekekKirajzolasa() {
 /** Bármely mező változásakor: állapot frissítése és újraszámolás. */
 function urlapValtozas(esemeny) {
   const mezo = esemeny.target;
-  if (!blokkAllapot || mezo.tagName !== "INPUT") return;
+  if (!blokkAllapot || (mezo.tagName !== "INPUT" && mezo.tagName !== "SELECT")) return;
 
   if (mezo.dataset.mezo) {
     // Fejléc-mezők (bolt, dátum, fizetési mód, bruttó, ÁFA)
@@ -915,6 +947,7 @@ function sorHozzaadasa() {
     mennyisegi_egyseg: null,
     egysegar: null,
     reszosszeg: null,
+    kategoria: ALAP_KATEGORIA,
   });
   termekekKirajzolasa();
   urlapFrissites();

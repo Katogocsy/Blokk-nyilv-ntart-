@@ -421,7 +421,8 @@ body {
   padding: 10px 4px;
 }
 
-.termek-tabla input {
+.termek-tabla input,
+.termek-tabla select {
   width: 100%;
   min-height: 40px;
   padding: 6px 6px;
@@ -438,7 +439,8 @@ body {
   outline-offset: 0;
 }
 
-.termek-tabla .oszlop-nev { width: 40%; }
+.termek-tabla .oszlop-nev { width: 30%; }
+.termek-tabla .oszlop-kat { width: 20%; }
 .termek-tabla .oszlop-menny { width: 14%; }
 .termek-tabla .oszlop-ar { width: 20%; }
 .termek-tabla .oszlop-resz { width: 20%; }
@@ -584,7 +586,9 @@ input.hibas {
   }
 
   .termek-tabla th:first-child,
+  .termek-tabla th:nth-child(2),
   .termek-tabla td.oszlop-nev,
+  .termek-tabla td.oszlop-kat,
   .termek-tabla td.ures-tabla {
     grid-column: 1 / -1;
   }
@@ -616,4 +620,10 @@ input.hibas {
 .halvany-jel {
   font-weight: 400;
   color: var(--halvany);
+}
+
+/* Kategória legördülő a terméksorokban */
+.termek-tabla select {
+  appearance: auto;
+  cursor: pointer;
 }
