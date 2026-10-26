@@ -612,3 +612,8 @@ input.hibas {
 .mentes-eredmeny li + li {
   margin-top: 3px;
 }
+
+.halvany-jel {
+  font-weight: 400;
+  color: var(--halvany);
+}

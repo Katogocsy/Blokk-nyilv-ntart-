@@ -333,40 +333,6 @@ Szabályok:
 - Az "ocr_bizalom" azt mutassa, mennyire biztos a kiolvasás: "magas", ha minden fontos adat jól olvasható; "kozepes", ha néhány adat bizonytalan; "alacsony", ha sok adat olvashatatlan.
 - Ha a termékek "reszosszeg" értékeinek összege nem egyezik közelítőleg a "brutto_vegosszeg"-gel, az "ocr_bizalom" legyen "alacsony".`;
 
-/** Egy Gemini-kérés elküldése; hibánál kivételt dob, sikernél a nyers választ adja vissza. */
-async function geminiKeres(keres) {
-  const cfg = getConfig();
-  const url = `${GEMINI_API_ALAP}/${encodeURIComponent(cfg.GEMINI_MODEL)}:generateContent`;
-
-  let valasz;
-  try {
-    valasz = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": cfg.GEMINI_API_KEY,
-      },
-      body: JSON.stringify(keres),
-    });
-  } catch (halozatiHiba) {
-    throw new Error("Nem sikerült elérni a Gemini szervert. Ellenőrizd az internetkapcsolatot.");
-  }
-
-  const adat = await valasz.json().catch(() => null);
-  console.log("Gemini nyers válasz:", adat);
-
-  if (!valasz.ok) {
-    const uzenet = adat?.error?.message || `HTTP ${valasz.status}`;
-    console.error("Gemini hiba:", valasz.status, adat);
-    const hiba = new Error(`A Gemini hívás sikertelen (${valasz.status}): ${uzenet}`);
-    hiba.status = valasz.status;
-    hiba.apiUzenet = uzenet;
-    throw hiba;
-  }
-
-  return adat;
-}
-
 /** A válasz szöveges részének kinyerése (a „gondolkodás” részeket kihagyva). */
 function valaszSzovege(adat) {
   return (adat?.candidates?.[0]?.content?.parts || [])
@@ -475,18 +441,139 @@ function blokkEllenorzese(blokk) {
   return figyelmeztetesek;
 }
 
+/** Tartalék modellek, ha a beállított modell túlterhelt (az első, ami nem egyezik a beállítottal). */
+const TARTALEK_MODELLEK = ["gemini-3.5-flash", "gemini-2.5-flash"];
+
+/** Ezeknél a hibáknál érdemes újrapróbálni: túlterhelés, kvóta, szerverhiba, hálózat. */
+const UJRAPROBALHATO_STATUSZOK = [429, 500, 502, 503, 504];
+
+/** Alap várakozás az újrapróbálás előtt (ms), és a legtöbb, amennyit kivárunk. */
+const UJRAPROBALAS_VARAKOZAS_MS = 5000;
+const MAX_VARAKOZAS_MS = 20000;
+
+function varakozas(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** A Gemini által javasolt várakozási idő (pl. "17s" a RetryInfo-ban), ms-ben – ha van. */
+function javasoltVarakozas(adat) {
+  const reszletek = adat?.error?.details || [];
+  for (const d of reszletek) {
+    const m = /^(\d+(?:\.\d+)?)s$/.exec(d?.retryDelay || "");
+    if (m) return Math.ceil(Number(m[1]) * 1000);
+  }
+  return null;
+}
+
+/** A Gemini hibakódjának magyar, érthető megfogalmazása. */
+function geminiHibaUzenet(status, apiUzenet, modell) {
+  const u = apiUzenet || "";
+  if (status === 503) {
+    return `A Gemini szervere most túlterhelt (503). Ez átmeneti – próbáld újra pár perc múlva.`;
+  }
+  if (status === 429) {
+    return /quota|per day|daily/i.test(u)
+      ? "Elérted a Gemini ingyenes keretét (429). Várj egy kicsit (vagy holnapig, ha a napi keret fogyott el), majd próbáld újra."
+      : "Túl sok kérés ment rövid idő alatt a Geminihez (429). Várj egy percet, majd próbáld újra.";
+  }
+  if (status === 500 || status === 502 || status === 504) {
+    return `A Gemini szervere hibát jelzett (${status}). Ez általában átmeneti – próbáld újra kicsit később.`;
+  }
+  if (status === 400 && /api key|API_KEY/i.test(u)) {
+    return "A Gemini API kulcs érvénytelen. Ellenőrizd, és másold be újra a ⚙️ Beállításokban.";
+  }
+  if (status === 403) {
+    return "A Gemini megtagadta a hozzáférést (403). Ellenőrizd az API kulcsot és annak korlátozásait a Google AI Studióban.";
+  }
+  if (status === 404) {
+    return `A(z) „${modell}” modell nem található (404). Ellenőrizd a modell nevét a ⚙️ Beállításokban.`;
+  }
+  if (status === 400) {
+    return `A Gemini nem tudta feldolgozni a kérést (400): ${u}`;
+  }
+  return `A Gemini hívás sikertelen (${status}): ${u}`;
+}
+
+/** Egy Gemini-kérés elküldése a megadott modellnek; hibánál kivételt dob, sikernél a nyers választ adja vissza. */
+async function geminiKeres(keres, modell) {
+  const cfg = getConfig();
+  const url = `${GEMINI_API_ALAP}/${encodeURIComponent(modell)}:generateContent`;
+
+  let valasz;
+  try {
+    valasz = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": cfg.GEMINI_API_KEY,
+      },
+      body: JSON.stringify(keres),
+    });
+  } catch (halozatiHiba) {
+    const hiba = new Error(
+      navigator.onLine === false
+        ? "Nincs internetkapcsolat. Kapcsold be a netet, majd próbáld újra."
+        : "Nem sikerült elérni a Gemini szervert. Ellenőrizd az internetkapcsolatot."
+    );
+    hiba.halozati = true;
+    throw hiba;
+  }
+
+  const adat = await valasz.json().catch(() => null);
+  console.log(`Gemini nyers válasz (${modell}):`, adat);
+
+  if (!valasz.ok) {
+    const apiUzenet = adat?.error?.message || `HTTP ${valasz.status}`;
+    console.error("Gemini hiba:", valasz.status, adat);
+    const hiba = new Error(geminiHibaUzenet(valasz.status, apiUzenet, modell));
+    hiba.status = valasz.status;
+    hiba.apiUzenet = apiUzenet;
+    hiba.varakozasMs = javasoltVarakozas(adat);
+    throw hiba;
+  }
+
+  return adat;
+}
+
+/** Egy modell kipróbálása: először sémával, ha azt nem fogadja el, sima JSON-módban. */
+async function elemzesModellel(tartalom, modell) {
+  try {
+    return await geminiKeres(
+      {
+        contents: tartalom,
+        generationConfig: { responseMimeType: "application/json", responseSchema: BLOKK_SEMA },
+      },
+      modell
+    );
+  } catch (h) {
+    // Ha a modell/API a sémát nem fogadja el, sima JSON-módban próbáljuk újra
+    // (a mezőket az utasítás így is pontosan leírja).
+    const semaHiba =
+      h.status === 400 && /schema|responseSchema|Unknown name|Invalid JSON payload/i.test(h.apiUzenet || "");
+    if (!semaHiba) throw h;
+    console.warn("A séma nem lett elfogadva, újrapróbálás sima JSON-módban:", h.apiUzenet);
+    return geminiKeres({ contents: tartalom, generationConfig: { responseMimeType: "application/json" } }, modell);
+  }
+}
+
+function ujraprobalhato(hiba) {
+  return hiba.halozati || UJRAPROBALHATO_STATUSZOK.includes(hiba.status);
+}
+
 /**
  * Kép elküldése a Gemini Flash API-nak, strukturált JSON-választ kérve.
- * A nyers választ a konzolra írja; hibánál kivételt dob.
+ * Túlterhelés/kvóta/szerverhiba esetén egyszer újrapróbálja ugyanazzal a modellel,
+ * majd ha az sem sikerül, egy tartalék modellel. (Az elemzésnél ez biztonságos:
+ * nem ment semmit, így nem keletkezhet duplikátum.)
  * @param {File} imageFile
- * @returns {Promise<{nyers: object, blokk: object, figyelmeztetesek: {szoveg: string, osszeg?: boolean}[]}>}
+ * @param {(szoveg: string) => void} [jelzes] – folyamatjelzés a felületnek
+ * @returns {Promise<{nyers: object, blokk: object, figyelmeztetesek: {szoveg: string, osszeg?: boolean}[], modell: string, tartalek: boolean}>}
  */
-async function sendToGemini(imageFile) {
+async function sendToGemini(imageFile, jelzes = () => {}) {
   const hiba = konfigHiba();
   if (hiba) throw new Error(hiba);
 
   const base64 = await fajlBase64Re(imageFile);
-
   const tartalom = [
     {
       parts: [
@@ -496,22 +583,42 @@ async function sendToGemini(imageFile) {
     },
   ];
 
+  const fomodell = getConfig().GEMINI_MODEL;
+  const tartalekModell = TARTALEK_MODELLEK.find((m) => m !== fomodell);
+
   let nyers;
+  let hasznaltModell = fomodell;
   try {
-    nyers = await geminiKeres({
-      contents: tartalom,
-      generationConfig: { responseMimeType: "application/json", responseSchema: BLOKK_SEMA },
-    });
-  } catch (h) {
-    // Ha a modell/API a sémát nem fogadja el, sima JSON-módban próbáljuk újra
-    // (a mezőket az utasítás így is pontosan leírja).
-    const semaHiba = h.status === 400 && /schema|responseSchema|Unknown name|Invalid JSON payload/i.test(h.apiUzenet || "");
-    if (!semaHiba) throw h;
-    console.warn("A séma nem lett elfogadva, újrapróbálás sima JSON-módban:", h.apiUzenet);
-    nyers = await geminiKeres({
-      contents: tartalom,
-      generationConfig: { responseMimeType: "application/json" },
-    });
+    nyers = await elemzesModellel(tartalom, fomodell);
+  } catch (elsoHiba) {
+    if (!ujraprobalhato(elsoHiba)) throw elsoHiba;
+
+    // 1. újrapróbálás ugyanazzal a modellel, rövid várakozás után
+    const varakozasMs = Math.min(elsoHiba.varakozasMs || UJRAPROBALAS_VARAKOZAS_MS, MAX_VARAKOZAS_MS);
+    const ok = elsoHiba.status === 503 ? "túlterhelt" : elsoHiba.status === 429 ? "korlátozza a kéréseket" : "nem válaszolt rendesen";
+    jelzes(`A Gemini most ${ok}, ${Math.round(varakozasMs / 1000)} mp múlva újrapróbálom…`);
+    console.warn(`Gemini hiba (${elsoHiba.status || "hálózat"}), újrapróbálás ${varakozasMs} ms múlva.`);
+    await varakozas(varakozasMs);
+
+    try {
+      jelzes("Újrapróbálás…");
+      nyers = await elemzesModellel(tartalom, fomodell);
+    } catch (masodikHiba) {
+      if (!ujraprobalhato(masodikHiba) || masodikHiba.halozati || !tartalekModell) throw masodikHiba;
+
+      // 2. tartalék modell
+      jelzes(`Még mindig nem megy, a tartalék modellel próbálom (${tartalekModell})…`);
+      console.warn(`Átváltás tartalék modellre: ${tartalekModell}`);
+      try {
+        nyers = await elemzesModellel(tartalom, tartalekModell);
+        hasznaltModell = tartalekModell;
+      } catch (tartalekHiba) {
+        // A felhasználónak az eredeti modell hibája az informatívabb
+        console.error("A tartalék modell is hibát adott:", tartalekHiba);
+        masodikHiba.message += " (A tartalék modell sem válaszolt.)";
+        throw masodikHiba;
+      }
+    }
   }
 
   const szoveg = valaszSzovege(nyers);
@@ -529,7 +636,7 @@ async function sendToGemini(imageFile) {
   }
   console.log("Feldolgozott blokk:", blokk);
 
-  return { nyers, blokk, figyelmeztetesek };
+  return { nyers, blokk, figyelmeztetesek, modell: hasznaltModell, tartalek: hasznaltModell !== fomodell };
 }
 
 // --- Ellenőrző űrlap ---
@@ -1087,21 +1194,25 @@ async function elemzes() {
   allapotBeallitas("Elemzés folyamatban… (Gemini)", "info");
 
   try {
-    const { blokk, figyelmeztetesek } = await sendToGemini(kivalasztottFajl);
+    const { blokk, figyelmeztetesek, modell, tartalek } = await sendToGemini(
+      kivalasztottFajl,
+      (szoveg) => allapotBeallitas(szoveg, "figyelem")
+    );
     urlapMegjelenitese(blokk, figyelmeztetesek);
 
     const tetelSzam = blokk.termekek.length;
+    const tartalekMegj = tartalek ? ` (A tartalék modell – ${modell} – végezte az elemzést.)` : "";
     if (blokk.ocr_bizalom === "alacsony" || figyelmeztetesek.length) {
       allapotBeallitas(
-        `Elemzés kész (${tetelSzam} tétel), de a kiolvasás bizonytalan – ellenőrizd az adatokat lent!`,
+        `Elemzés kész (${tetelSzam} tétel), de a kiolvasás bizonytalan – ellenőrizd az adatokat lent!${tartalekMegj}`,
         "figyelem"
       );
     } else {
-      allapotBeallitas(`Elemzés kész: ${tetelSzam} tétel. Ellenőrizd az adatokat lent.`, "siker");
+      allapotBeallitas(`Elemzés kész: ${tetelSzam} tétel. Ellenőrizd az adatokat lent.${tartalekMegj}`, "siker");
     }
   } catch (hiba) {
     console.error(hiba);
-    allapotBeallitas("Hiba: " + hiba.message, "hiba");
+    allapotBeallitas("❌ " + hiba.message, "hiba");
   } finally {
     elemzesGomb.disabled = false;
   }
